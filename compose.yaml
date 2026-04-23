@@ -1,17 +1,18 @@
 ---
 services:
   throttle-proxy:
-    build: .
+    # build: .          # <- Uncomment to build the image
+    image: ghcr.io/spaghetti-coder/throttle-proxy:latest
     container_name: throttle-proxy
     restart: unless-stopped
     ports:
-      - 7080:8088
+      - 7080:8080
     environment:
       # Multiple upstreams are supported (at least 1 required)
       # - UPSTREAM=http://upstream1,https://upstream2,...
       - UPSTREAM=http://upstream
       # Port to listen on (default: 8080)
-      - PORT=8088
+      # - PORT=8088
       # Max time in seconds a request can wait (default: 0 = disabled).
       # - MAX_WAIT=30
 
@@ -20,12 +21,12 @@ services:
 
       # Upstream fetch timeout in seconds (default: 5)
       - UPSTREAM_TIMEOUT=7
-      
+
       # Delay range in seconds, (default: 0 for both = no delay).
       # DELAY_MAX < DELAY_MIN => DELAY_MAX = DELAY_MIN
       - DELAY_MIN=5
       - DELAY_MAX=9
-      
+
       # Gradually increase delays under sustained high-frequency requests.
       # After escalation:
       #   DELAY_MIN = DELAY_MIN * rand(1.5, 2)
@@ -35,9 +36,23 @@ services:
       # Max number of delay escalation steps (default: 3, 0 = unlimited).
       # NOTE: don't go too high!
       - ESCALATE_DELAY_MAX_COUNT=6
-      
+
       # Endpoints to throttle, prefix-matched (default: '/' = all).
       # - ENDPOINTS=/foo,/bar/baz
 
       # Maximum queue size (default: 10000, min: 100, 0 = default)
       # - QUEUE_SIZE=100
+
+
+
+# ~~~ Sanity test ~~~
+  #     - DELAY_MIN=0.1
+  #     - DELAY_MAX=0.1
+  #     - ESCALATE_DELAY_AFTER=3
+  #     - ESCALATE_DELAY_MAX_COUNT=4
+  # upstream: { image: nginx:alpine }
+
+# for i in {0..40}; do
+#   [ $i -eq 5 ] && (set -x; sleep 6)
+#   { time curl -X HEAD -s "http://localhost:8080/" >/dev/null; } 2>&1 | grep real
+# done

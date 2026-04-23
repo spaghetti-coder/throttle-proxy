@@ -53,7 +53,20 @@ See [spec.md](spec.md) for detailed architecture documentation.
 
 ### Docker
 
-Clone [`compose.yaml`](compose.yaml), edit and `docker compose up -d`
+Clone [`compose.yaml`](compose.yaml), edit and `docker compose up -d`.
+
+<details><summary>Manual docker image build</summary>
+
+```bash
+docker build -t throttle-proxy:latest .
+```
+
+The image supports multi-platform builds (linux/amd64, linux/arm64) when using Docker Buildx:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t throttle-proxy:latest .
+```
+</details>
 
 ### Go
 
