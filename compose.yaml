@@ -1,0 +1,39 @@
+---
+services:
+  throttle-proxy:
+    build: .
+    container_name: throttle-proxy
+    restart: unless-stopped
+    ports:
+      - 7080:8088
+    environment:
+      # Multiple upstreams are supported (at least 1 required)
+      # - UPSTREAM=http://upstream1,https://upstream2,...
+      - UPSTREAM=http://upstream
+      # Port to listen on (default: 8080)
+      - PORT=8088
+      # Max time in seconds a request can wait (default: 0 = disabled).
+      # - MAX_WAIT=30
+
+      # ~~ Throttle configuration ~~
+
+      # Upstream fetch timeout in seconds (default: 5)
+      - UPSTREAM_TIMEOUT=7
+      
+      # Delay range in seconds, (default: 0 for both = no delay).
+      # DELAY_MAX < DELAY_MIN => DELAY_MAX = DELAY_MIN
+      - DELAY_MIN=5
+      - DELAY_MAX=9
+      
+      # Gradually increase delays under sustained high-frequency requests.
+      # After escalation:
+      #   DELAY_MIN = DELAY_MIN * rand(1.5, 2)
+      #   DELAY_MAX = DELAY_MAX + DELAY_MIN - OLD_DELAY_MIN
+      # (default 0 = disabled)
+      - ESCALATE_DELAY_AFTER=8
+      # Max number of delay escalation steps (default: 3, 0 = unlimited).
+      # NOTE: don't go too high!
+      - ESCALATE_DELAY_MAX_COUNT=4
+      
+      # Endpoints to throttle, prefix-matched (default: '/' = all).
+      # - ENDPOINTS=/foo,/bar/baz
