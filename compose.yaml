@@ -16,6 +16,7 @@ services:
       # - MAX_WAIT=30
 
       # ~~ Throttle configuration ~~
+      #    Conservative settings
 
       # Upstream fetch timeout in seconds (default: 5)
       - UPSTREAM_TIMEOUT=7
@@ -30,10 +31,13 @@ services:
       #   DELAY_MIN = DELAY_MIN * rand(1.5, 2)
       #   DELAY_MAX = DELAY_MAX + DELAY_MIN - OLD_DELAY_MIN
       # (default 0 = disabled)
-      - ESCALATE_DELAY_AFTER=8
+      - ESCALATE_DELAY_AFTER=3
       # Max number of delay escalation steps (default: 3, 0 = unlimited).
       # NOTE: don't go too high!
-      - ESCALATE_DELAY_MAX_COUNT=4
+      - ESCALATE_DELAY_MAX_COUNT=6
       
       # Endpoints to throttle, prefix-matched (default: '/' = all).
       # - ENDPOINTS=/foo,/bar/baz
+
+      # Maximum queue size (default: 10000, min: 100, 0 = default)
+      # - QUEUE_SIZE=100

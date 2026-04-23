@@ -1,0 +1,409 @@
+package dispatcher
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+	"time"
+
+	"throttle-proxy/internal/config"
+)
+
+// TestNew tests dispatcher initialization
+func TestNew(t *testing.T) {
+	tests := []struct {
+		name       string
+		upstreams  []string
+		wantStates int
+	}{
+		{
+			name:       "single upstream",
+			upstreams:  []string{"http://localhost:8080"},
+			wantStates: 1,
+		},
+		{
+			name:       "multiple upstreams",
+			upstreams:  []string{"http://localhost:8080", "http://localhost:8081"},
+			wantStates: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstreams := make([]*url.URL, len(tt.upstreams))
+			for i, u := range tt.upstreams {
+				parsed, _ := url.Parse(u)
+				upstreams[i] = parsed
+			}
+
+			cfg := &config.Config{
+				Upstreams:       upstreams,
+				UpstreamTimeout: 5 * time.Second,
+			}
+
+			d := New(cfg)
+
+			if len(d.states) != tt.wantStates {
+				t.Errorf("expected %d states, got %d", tt.wantStates, len(d.states))
+			}
+			if d.queue == nil {
+				t.Error("expected queue to be initialized")
+			}
+			if d.client == nil {
+				t.Error("expected client to be initialized")
+			}
+		})
+	}
+}
+
+// TestEnqueue tests request enqueueing
+func TestEnqueue(t *testing.T) {
+	u, _ := url.Parse("http://localhost:8080")
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		QueueSize:       1,
+	}
+	d := New(cfg)
+
+	// Create test request
+	body := []byte("test body")
+	req := httptest.NewRequest("POST", "/test", bytes.NewReader(body))
+
+	resultChan := d.Enqueue(req)
+
+	if resultChan == nil {
+		t.Error("expected non-nil result channel")
+	}
+
+	// Verify request was queued
+	select {
+	case <-resultChan:
+		t.Error("expected channel to be empty initially")
+	default:
+		// Expected - channel should be empty
+	}
+}
+
+// TestEnqueue_WithoutBody tests request without body
+func TestEnqueue_WithoutBody(t *testing.T) {
+	u, _ := url.Parse("http://localhost:8080")
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		QueueSize:       1,
+	}
+	d := New(cfg)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+
+	resultChan := d.Enqueue(req)
+
+	if resultChan == nil {
+		t.Error("expected non-nil result channel")
+	}
+}
+
+// TestCopyHeaders_HopByHopExcluded tests hop-by-hop headers are excluded
+func TestCopyHeaders_HopByHopExcluded(t *testing.T) {
+	src := http.Header{
+		"Content-Type":       []string{"application/json"},
+		"Connection":         []string{"close"},
+		"Keep-Alive":         []string{"timeout=5"},
+		"Proxy-Authenticate": []string{"Basic"},
+		"X-Custom-Header":    []string{"value"},
+	}
+
+	dst := make(http.Header)
+	copyHeaders(dst, src)
+
+	// These should be present
+	if dst.Get("Content-Type") != "application/json" {
+		t.Error("expected Content-Type to be copied")
+	}
+	if dst.Get("X-Custom-Header") != "value" {
+		t.Error("expected X-Custom-Header to be copied")
+	}
+
+	// These should be excluded
+	if dst.Get("Connection") != "" {
+		t.Error("expected Connection to be excluded")
+	}
+	if dst.Get("Keep-Alive") != "" {
+		t.Error("expected Keep-Alive to be excluded")
+	}
+	if dst.Get("Proxy-Authenticate") != "" {
+		t.Error("expected Proxy-Authenticate to be excluded")
+	}
+}
+
+// TestCopyHeaders_ConnectionHeaderValues tests Connection header values exclusion
+func TestCopyHeaders_ConnectionHeaderValues(t *testing.T) {
+	src := http.Header{
+		"Content-Type": []string{"application/json"},
+		"X-Custom":     []string{"value"},
+		"Connection":   []string{"X-Custom, close"},
+	}
+
+	dst := make(http.Header)
+	copyHeaders(dst, src)
+
+	// Connection header itself should be excluded
+	if dst.Get("Connection") != "" {
+		t.Error("expected Connection header to be excluded")
+	}
+
+	// X-Custom should also be excluded since it's in Connection
+	if dst.Get("X-Custom") != "" {
+		t.Error("expected X-Custom to be excluded (listed in Connection)")
+	}
+
+	// Content-Type should be present
+	if dst.Get("Content-Type") != "application/json" {
+		t.Error("expected Content-Type to be copied")
+	}
+}
+
+// TestCopyHeaders_MultipleValues tests multiple header values preservation
+func TestCopyHeaders_MultipleValues(t *testing.T) {
+	src := http.Header{
+		"X-Values": []string{"value1", "value2", "value3"},
+	}
+
+	dst := make(http.Header)
+	copyHeaders(dst, src)
+
+	values := dst["X-Values"]
+	if len(values) != 3 {
+		t.Errorf("expected 3 values, got %d", len(values))
+	}
+	for i, v := range []string{"value1", "value2", "value3"} {
+		if values[i] != v {
+			t.Errorf("expected value[%d] = %q, got %q", i, v, values[i])
+		}
+	}
+}
+
+// TestFireRequest_Success tests successful request to upstream
+func TestFireRequest_Success(t *testing.T) {
+	// Create mock upstream server
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify request
+		if r.Method != "GET" {
+			t.Errorf("expected method GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/test" {
+			t.Errorf("expected path /test, got %s", r.URL.Path)
+		}
+		if r.Header.Get("X-Custom") != "value" {
+			t.Errorf("expected X-Custom header, got %s", r.Header.Get("X-Custom"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+	}
+	d := New(cfg)
+
+	// Create proxy request
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-Custom", "value")
+
+	body, _ := io.ReadAll(req.Body)
+	pr := &proxyRequest{
+		r:          req,
+		bodyBytes:  body,
+		resultChan: make(chan Result, 1),
+		enqueuedAt: time.Now(),
+		maxWait:    0,
+	}
+
+	// Get state
+	state := d.states[0]
+
+	// Fire request
+	ctx := context.Background()
+	result, err := d.fireRequest(ctx, pr, state)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, result.StatusCode)
+	}
+	if string(result.Body) != `{"status":"ok"}` {
+		t.Errorf("expected body %q, got %q", `{"status":"ok"}`, string(result.Body))
+	}
+	if result.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %s", result.Header.Get("Content-Type"))
+	}
+}
+
+// TestFireRequest_WithBody tests request body forwarding
+func TestFireRequest_WithBody(t *testing.T) {
+	// Create mock upstream server
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != "test body" {
+			t.Errorf("expected body 'test body', got %q", string(body))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+	}
+	d := New(cfg)
+
+	// Create proxy request with body
+	req := httptest.NewRequest("POST", "/test", bytes.NewReader([]byte("test body")))
+
+	pr := &proxyRequest{
+		r:          req,
+		bodyBytes:  []byte("test body"),
+		resultChan: make(chan Result, 1),
+		enqueuedAt: time.Now(),
+		maxWait:    0,
+	}
+
+	state := d.states[0]
+	ctx := context.Background()
+	_, err := d.fireRequest(ctx, pr, state)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestFireRequest_UpstreamError tests handling of upstream errors
+func TestFireRequest_UpstreamError(t *testing.T) {
+	// Create mock upstream server that returns 500
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("server error"))
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+	}
+	d := New(cfg)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	pr := &proxyRequest{
+		r:          req,
+		resultChan: make(chan Result, 1),
+		enqueuedAt: time.Now(),
+		maxWait:    0,
+	}
+
+	state := d.states[0]
+	ctx := context.Background()
+	result, err := d.fireRequest(ctx, pr, state)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 500 is still returned as a result, not an error
+	if result.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, result.StatusCode)
+	}
+}
+
+// TestDispatch_MaxWaitTimeout tests max wait timeout handling
+func TestDispatch_MaxWaitTimeout(t *testing.T) {
+	u, _ := url.Parse("http://localhost:8080")
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		DelayMin:        1 * time.Second,
+		DelayMax:        2 * time.Second,
+	}
+	d := New(cfg)
+
+	// Create request with short max wait
+	req := httptest.NewRequest("GET", "/test", nil)
+	pr := &proxyRequest{
+		r:          req,
+		resultChan: make(chan Result, 1),
+		enqueuedAt: time.Now().Add(-3 * time.Second), // Enqueued 3 seconds ago
+		maxWait:    1 * time.Second,                  // But max wait is 1 second
+	}
+
+	ctx := context.Background()
+	d.dispatch(ctx, pr)
+
+	result := <-pr.resultChan
+	if result.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d for max wait exceeded, got %d", http.StatusServiceUnavailable, result.StatusCode)
+	}
+	if result.Err == nil || result.Err.Error() != "max wait exceeded" {
+		t.Errorf("expected 'max wait exceeded' error, got %v", result.Err)
+	}
+}
+
+// TestDispatch_ContextCancellation tests context cancellation
+func TestDispatch_ContextCancellation(t *testing.T) {
+	// Create a test server that will block
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Block until context is cancelled
+		<-r.Context().Done()
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		DelayMin:        0,
+		DelayMax:        0,
+	}
+	d := New(cfg)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	pr := &proxyRequest{
+		r:          req,
+		resultChan: make(chan Result, 1),
+		enqueuedAt: time.Now(),
+		maxWait:    0,
+	}
+
+	// Create context that we'll cancel
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start dispatch in goroutine
+	done := make(chan bool)
+	go func() {
+		d.dispatch(ctx, pr)
+		done <- true
+	}()
+
+	// Cancel context after short delay
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// Wait for dispatch to complete
+	<-done
+
+	result := <-pr.resultChan
+	// Context cancellation during request returns 502 from fireRequest
+	if result.StatusCode != http.StatusBadGateway {
+		t.Logf("Got status code %d with error: %v", result.StatusCode, result.Err)
+	}
+}

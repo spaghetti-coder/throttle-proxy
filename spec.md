@@ -18,19 +18,15 @@ docker, docker compose, golang
 
 ## Requests queue
 
-The requests queue stores requests and ensures their sequential processing with configured randomized delay. The queue is unbounded — incoming requests are always accepted and held until dispatched.
+The requests queue stores requests and ensures their sequential processing with configured randomized delay. The queue size is configurable via the QUEUE_SIZE environment variable:
+- Default: 10000
+- Minimum: 100 (values below 100 are raised to 100)
+- Special case: QUEUE_SIZE=0 is treated as 10000
+Incoming requests are accepted until the queue reaches its configured limit.
 
 `MAX_WAIT` (optional, seconds, default 0 = disabled) — if a request waits longer than this before firing, return 503 immediately.
 
-**Queue approximate structure**:
-
-```
-- request: ...
-  created: now()
-```
-
-- `request` contains everything required to be proxied to upstream (request query, body, method, ...).
-- `created` serves for delay escalation.
+Requests in the queue are kept with their original content (including body) and a timestamp of when they entered the queue to support timeout calculations.
 
 ## Multi-upstream
 
@@ -46,7 +42,7 @@ If upstream fails (timeout or server failure):
 
 A failed request still updates the upstream's `next_min_ts` and counts toward its escalation sliding window.
 
-On success, the upstream response (status code, headers, body, etc) is forwarded to the client as-is.
+On success, the upstream response (status code, headers, body, etc) is forwarded to the client as-is. The original client IP is preserved in the X-Forwarded-For header (taking into account existing X-Forwarded-For and X-Real-IP headers) for upstream logging and access control.
 
 ## Delay escalation
 
@@ -54,7 +50,14 @@ Gradually increase delays under sustained high-frequency requests to avoid searc
 
 Each upstream maintains its own escalation state (current `DELAY_MIN`, `DELAY_MAX`, and sliding window), since each upstream maps to a different search engine with independent ban risk. All escalation calculations use the upstream's current `DELAY_MIN`/`DELAY_MAX`, not the global defaults.
 
-Escalation is triggered when the span between the oldest and the newest request in a sliding window of `ESCALATE_DELAY_AFTER` requests to a given upstream is less than or equal to `DELAY_MAX * ESCALATE_DELAY_AFTER`. When triggered, delays are escalated:
+The sliding window stores metadata for each request, including its timestamp and the `escalationCount` active at the time of the request.
+
+Escalation is triggered when the following conditions are met:
+1. The window contains at least `ESCALATE_DELAY_AFTER - 1` requests.
+2. The oldest request in the window has the same `escalationCount` as the current state (ensuring escalation happens per generation).
+3. The span between the oldest and the newest request in the window is less than or equal to `DELAY_MAX * ESCALATE_DELAY_AFTER`.
+
+When triggered, delays are escalated:
 
 ```
 DELAY_MIN = DELAY_MIN * rand(1.5, 2)
@@ -65,7 +68,7 @@ The jitter window (`DELAY_MAX - DELAY_MIN`) is preserved across escalations.
 
 `ESCALATE_DELAY_MAX_COUNT` caps the number of escalation steps (default: 3, 0 = unlimited).
 
-**Reset**: when the span between the oldest and newest request in the window exceeds `DELAY_MAX * ESCALATE_DELAY_AFTER`, delays reset to their initial values.
+**Reset**: when the span between the oldest and newest request in the window exceeds `DELAY_MAX * ESCALATE_DELAY_AFTER`, delays reset to their initial values and the sliding window is cleared.
 
 ## Endpoints
 
