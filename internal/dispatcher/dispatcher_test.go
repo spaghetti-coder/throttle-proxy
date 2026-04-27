@@ -638,3 +638,68 @@ func TestDispatch_ContextCancellation(t *testing.T) {
 		t.Logf("Got status code %d with error: %v", result.StatusCode, result.Err)
 	}
 }
+
+// TestResult_ContentLength tests that Content-Length is not set for chunked responses
+func TestResult_ContentLength(t *testing.T) {
+	upChunked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	defer upChunked.Close()
+
+	upPlain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	defer upPlain.Close()
+
+	u1, _ := url.Parse(upChunked.URL)
+	u2, _ := url.Parse(upPlain.URL)
+
+	t.Run("chunked", func(t *testing.T) {
+		cfg := &config.Config{
+			Upstreams:       []*url.URL{u1},
+			UpstreamTimeout: 5 * time.Second,
+			DelayMin:        0,
+			DelayMax:        0,
+		}
+		d := New(cfg)
+		req := httptest.NewRequest("GET", "/test", nil)
+		pr := &proxyRequest{
+			r:          req,
+			resultChan: make(chan Result, 1),
+			enqueuedAt: time.Now(),
+			maxWait:    0,
+		}
+		ctx := context.Background()
+		d.dispatch(ctx, pr)
+		res := <-pr.resultChan
+		if cl := res.Header.Get("Content-Length"); cl != "" {
+			t.Errorf("expected no Content-Length for chunked response, got %q", cl)
+		}
+	})
+
+	t.Run("plain", func(t *testing.T) {
+		cfg := &config.Config{
+			Upstreams:       []*url.URL{u2},
+			UpstreamTimeout: 5 * time.Second,
+			DelayMin:        0,
+			DelayMax:        0,
+		}
+		d := New(cfg)
+		req := httptest.NewRequest("GET", "/test", nil)
+		pr := &proxyRequest{
+			r:          req,
+			resultChan: make(chan Result, 1),
+			enqueuedAt: time.Now(),
+			maxWait:    0,
+		}
+		ctx := context.Background()
+		d.dispatch(ctx, pr)
+		res := <-pr.resultChan
+		if cl := res.Header.Get("Content-Length"); cl != "2" {
+			t.Errorf("expected Content-Length 2, got %q", cl)
+		}
+	})
+}

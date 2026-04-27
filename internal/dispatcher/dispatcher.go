@@ -228,7 +228,9 @@ func (d *Dispatcher) fireRequest(ctx context.Context, pr *proxyRequest, state *u
 
 	h := make(http.Header)
 	copyHeaders(h, resp.Header)
-	h.Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
+	if len(resp.TransferEncoding) == 0 {
+		h.Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
+	}
 
 	return Result{StatusCode: resp.StatusCode, Header: h, Body: respBody}, nil
 }
