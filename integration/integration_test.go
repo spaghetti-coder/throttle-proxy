@@ -53,6 +53,9 @@ func TestSequentialProcessing(t *testing.T) {
 	defer cancel()
 	go disp.Run(ctx)
 
+	// Wait for dispatcher to start accepting requests
+	time.Sleep(10 * time.Millisecond)
+
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -102,6 +105,9 @@ func TestFailoverBehavior(t *testing.T) {
 	defer cancel()
 	go disp.Run(ctx)
 
+	// Wait for dispatcher to start accepting requests
+	time.Sleep(10 * time.Millisecond)
+
 	req := httptest.NewRequest("GET", "/", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -139,6 +145,9 @@ func TestEndpointMatching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
+
+	// Wait for dispatcher to start accepting requests
+	time.Sleep(10 * time.Millisecond)
 
 	tests := []struct {
 		path           string
@@ -232,6 +241,9 @@ func TestConcurrentSafe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
+
+	// Wait for dispatcher to start accepting requests
+	time.Sleep(10 * time.Millisecond)
 
 	var wg sync.WaitGroup
 

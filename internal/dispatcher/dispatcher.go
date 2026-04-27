@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"throttle-proxy/internal/config"
@@ -44,12 +45,13 @@ type proxyRequest struct {
 
 // Dispatcher serializes requests to upstreams using Earliest Deadline First scheduling.
 type Dispatcher struct {
-	cfg    *config.Config
-	states []*upstream.State
-	queue  chan *proxyRequest
-	client *http.Client
-	rng    *rand.Rand
-	done   chan struct{}
+	cfg     *config.Config
+	states  []*upstream.State
+	queue   chan *proxyRequest
+	client  *http.Client
+	rng     *rand.Rand
+	done    chan struct{}
+	running atomic.Bool
 }
 
 func New(cfg *config.Config) *Dispatcher {
@@ -102,9 +104,11 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 		enqueuedAt: time.Now(),
 		maxWait:    d.cfg.MaxWait,
 	}
-	select {
-	case <-d.done:
+	if !d.running.Load() {
 		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("dispatcher stopped")}
+		return pr.resultChan
+	}
+	select {
 	case d.queue <- pr:
 	default:
 		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("queue full")}
@@ -114,8 +118,10 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 
 // Run is the single dispatcher goroutine. It must be started exactly once.
 func (d *Dispatcher) Run(ctx context.Context) {
+	d.running.Store(true)
 	defer func() {
 		// Drain any remaining queued requests after shutdown.
+		d.running.Store(false)
 		close(d.done)
 	}()
 	for {

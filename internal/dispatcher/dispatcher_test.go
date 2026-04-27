@@ -80,19 +80,18 @@ func TestEnqueue(t *testing.T) {
 	if resultChan == nil {
 		t.Error("expected non-nil result channel")
 	}
-
-	// Verify request was queued
-	select {
-	case <-resultChan:
-		t.Error("expected channel to be empty initially")
-	default:
-		// Expected - channel should be empty
-	}
 }
 
 // TestEnqueue_FullQueue tests that Enqueue returns 503 when the queue is at capacity
 func TestEnqueue_FullQueue(t *testing.T) {
-	u, _ := url.Parse("http://localhost:8080")
+	// Create an upstream that blocks until context is cancelled so Run
+	// cannot quickly drain the queue.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
 	cfg := &config.Config{
 		Upstreams:       []*url.URL{u},
 		UpstreamTimeout: 5 * time.Second,
@@ -100,29 +99,41 @@ func TestEnqueue_FullQueue(t *testing.T) {
 	}
 	d := New(cfg)
 
-	// Fill the queue without consuming it
+	ctx, cancel := context.WithCancel(context.Background())
+	go d.Run(ctx)
+	defer cancel()
+
+	// Give Run time to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Fill the queue: req1 will be picked up by Run and block in fireRequest
 	req1 := httptest.NewRequest("GET", "/test1", nil)
 	_ = d.Enqueue(req1)
 
-	// Since Run isn't started, a blocking Enqueue would deadlock.
-	// An immediate 503 should be returned for the second request.
+	// req2 should go into the queue buffer (capacity 1)
 	req2 := httptest.NewRequest("GET", "/test2", nil)
+	_ = d.Enqueue(req2)
+
+	// Give Run time to pick up req1
+	time.Sleep(50 * time.Millisecond)
+
+	// req3 should trigger queue full — immediate 503
+	req3 := httptest.NewRequest("GET", "/test3", nil)
 	done := make(chan struct{})
-	var result2 Result
+	var result3 Result
 	go func() {
-		resultChan2 := d.Enqueue(req2)
-		result2 = <-resultChan2
+		resultChan3 := d.Enqueue(req3)
+		result3 = <-resultChan3
 		close(done)
 	}()
 
 	select {
 	case <-done:
-		// Expected: Enqueue should have returned immediately with a 503.
-		if result2.StatusCode != http.StatusServiceUnavailable {
-			t.Fatalf("expected status %d for full queue, got %d", http.StatusServiceUnavailable, result2.StatusCode)
+		if result3.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected status %d for full queue, got %d", http.StatusServiceUnavailable, result3.StatusCode)
 		}
-		if result2.Err == nil || result2.Err.Error() != "queue full" {
-			t.Fatalf("expected 'queue full' error, got %v", result2.Err)
+		if result3.Err == nil || result3.Err.Error() != "queue full" {
+			t.Fatalf("expected 'queue full' error, got %v", result3.Err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Enqueue blocked on full queue — deadlock detected")

@@ -118,11 +118,11 @@ go build -o throttle-proxy ./cmd/throttle-proxy
 ## Testing
 
 ```bash
-go test ./...
+go test -count 1 ./...
 ```
 
 Integration tests cover sequential processing, upstream failover, endpoint matching, and round-robin passthrough:
 
 ```bash
-go test ./integration/...
+go test -count 1 ./integration/...
 ```
