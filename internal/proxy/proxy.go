@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"sync/atomic"
@@ -63,7 +64,9 @@ func (h *Handler) serveThrottled(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(res.StatusCode)
-	w.Write(res.Body) //nolint:errcheck
+	if _, err := w.Write(res.Body); err != nil {
+		slog.Warn("failed to write response body", "err", err)
+	}
 }
 
 func (h *Handler) servePassthrough(w http.ResponseWriter, r *http.Request) {
