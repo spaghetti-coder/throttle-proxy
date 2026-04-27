@@ -49,6 +49,7 @@ type Dispatcher struct {
 	queue  chan *proxyRequest
 	client *http.Client
 	rng    *rand.Rand
+	done   chan struct{}
 }
 
 func New(cfg *config.Config) *Dispatcher {
@@ -75,6 +76,7 @@ func New(cfg *config.Config) *Dispatcher {
 		queue:  make(chan *proxyRequest, queueSize),
 		client: client,
 		rng:    rand.New(rand.NewSource(time.Now().UnixNano())),
+		done:   make(chan struct{}),
 	}
 }
 
@@ -95,6 +97,8 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 		maxWait:    d.cfg.MaxWait,
 	}
 	select {
+	case <-d.done:
+		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("dispatcher stopped")}
 	case d.queue <- pr:
 	default:
 		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("queue full")}
@@ -104,6 +108,7 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 
 // Run is the single dispatcher goroutine. It must be started exactly once.
 func (d *Dispatcher) Run(ctx context.Context) {
+	defer close(d.done)
 	for {
 		select {
 		case <-ctx.Done():

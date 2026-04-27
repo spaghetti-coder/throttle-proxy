@@ -128,6 +128,51 @@ func TestEnqueue_FullQueue(t *testing.T) {
 	}
 }
 
+// TestEnqueue_AfterStop verifies Enqueue returns 503 after dispatcher has stopped
+func TestEnqueue_AfterStop(t *testing.T) {
+	u, _ := url.Parse("http://localhost:8080")
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		QueueSize:       10,
+	}
+	d := New(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go d.Run(ctx)
+
+	// Give Run time to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Stop dispatcher
+	cancel()
+
+	// Give Run time to exit and close done channel
+	time.Sleep(50 * time.Millisecond)
+
+	// Enqueue after stop — must not block
+	req := httptest.NewRequest("GET", "/test", nil)
+	done := make(chan struct{})
+	var result Result
+	go func() {
+		ch := d.Enqueue(req)
+		result = <-ch
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if result.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected status 503 after stop, got %d", result.StatusCode)
+		}
+		if result.Err == nil || result.Err.Error() != "dispatcher stopped" {
+			t.Fatalf("expected 'dispatcher stopped' error, got %v", result.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Enqueue blocked after dispatcher stopped — deadlock")
+	}
+}
+
 // TestEnqueue_WithoutBody tests request without body
 func TestEnqueue_WithoutBody(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
