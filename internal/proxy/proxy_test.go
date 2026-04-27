@@ -277,3 +277,86 @@ func TestServeHTTP_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+// TestXForwardedForConsistency verifies both throttled and passthrough paths set XFF identically
+func TestXForwardedForConsistency(t *testing.T) {
+	t.Run("passthrough without existing XFF", func(t *testing.T) {
+		var receivedXFF string
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			receivedXFF = r.Header.Get("X-Forwarded-For")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer upstream.Close()
+
+		upstreamURL, _ := url.Parse(upstream.URL)
+		cfg := &config.Config{
+			Upstreams:       []*url.URL{upstreamURL},
+			UpstreamTimeout: 5 * time.Second,
+			Endpoints:       []string{"/throttled"},
+		}
+		handler := NewHandler(cfg, nil)
+
+		req := httptest.NewRequest("GET", "/passthrough", nil)
+		req.RemoteAddr = "1.2.3.4:5678"
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if receivedXFF != "1.2.3.4:5678" {
+			t.Errorf("expected XFF '1.2.3.4:5678', got %q", receivedXFF)
+		}
+	})
+
+	t.Run("passthrough with existing XFF", func(t *testing.T) {
+		var receivedXFF string
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			receivedXFF = r.Header.Get("X-Forwarded-For")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer upstream.Close()
+
+		upstreamURL, _ := url.Parse(upstream.URL)
+		cfg := &config.Config{
+			Upstreams:       []*url.URL{upstreamURL},
+			UpstreamTimeout: 5 * time.Second,
+			Endpoints:       []string{"/throttled"},
+		}
+		handler := NewHandler(cfg, nil)
+
+		req := httptest.NewRequest("GET", "/passthrough", nil)
+		req.Header.Set("X-Forwarded-For", "9.9.9.9")
+		req.RemoteAddr = "1.2.3.4:5678"
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if receivedXFF != "9.9.9.9, 1.2.3.4:5678" {
+			t.Errorf("expected XFF '9.9.9.9, 1.2.3.4:5678', got %q", receivedXFF)
+		}
+	})
+
+	t.Run("passthrough with X-Real-IP", func(t *testing.T) {
+		var receivedXFF string
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			receivedXFF = r.Header.Get("X-Forwarded-For")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer upstream.Close()
+
+		upstreamURL, _ := url.Parse(upstream.URL)
+		cfg := &config.Config{
+			Upstreams:       []*url.URL{upstreamURL},
+			UpstreamTimeout: 5 * time.Second,
+			Endpoints:       []string{"/throttled"},
+		}
+		handler := NewHandler(cfg, nil)
+
+		req := httptest.NewRequest("GET", "/passthrough", nil)
+		req.Header.Set("X-Real-IP", "5.5.5.5")
+		req.RemoteAddr = "1.2.3.4:5678"
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if receivedXFF != "5.5.5.5" {
+			t.Errorf("expected XFF '5.5.5.5', got %q", receivedXFF)
+		}
+	})
+}

@@ -25,6 +25,15 @@ func NewHandler(cfg *config.Config, disp *dispatcher.Dispatcher) *Handler {
 			Rewrite: func(req *httputil.ProxyRequest) {
 				req.SetURL(target)
 				req.Out.Host = target.Host
+				clientIP := req.In.RemoteAddr
+				if xri := req.In.Header.Get("X-Real-IP"); xri != "" {
+					clientIP = xri
+				}
+				if xff := req.In.Header.Get("X-Forwarded-For"); xff != "" {
+					req.Out.Header.Set("X-Forwarded-For", xff+", "+clientIP)
+				} else {
+					req.Out.Header.Set("X-Forwarded-For", clientIP)
+				}
 			},
 		}
 	}
