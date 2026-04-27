@@ -64,10 +64,15 @@ func New(cfg *config.Config) *Dispatcher {
 		},
 	}
 
+	queueSize := cfg.QueueSize
+	if queueSize < 1 {
+		queueSize = 1
+	}
+
 	return &Dispatcher{
 		cfg:    cfg,
 		states: states,
-		queue:  make(chan *proxyRequest, cfg.QueueSize),
+		queue:  make(chan *proxyRequest, queueSize),
 		client: client,
 		rng:    rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
@@ -89,7 +94,11 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 		enqueuedAt: time.Now(),
 		maxWait:    d.cfg.MaxWait,
 	}
-	d.queue <- pr
+	select {
+	case d.queue <- pr:
+	default:
+		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("queue full")}
+	}
 	return pr.resultChan
 }
 

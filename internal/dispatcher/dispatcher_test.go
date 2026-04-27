@@ -89,6 +89,45 @@ func TestEnqueue(t *testing.T) {
 	}
 }
 
+// TestEnqueue_FullQueue tests that Enqueue returns 503 when the queue is at capacity
+func TestEnqueue_FullQueue(t *testing.T) {
+	u, _ := url.Parse("http://localhost:8080")
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		QueueSize:       1,
+	}
+	d := New(cfg)
+
+	// Fill the queue without consuming it
+	req1 := httptest.NewRequest("GET", "/test1", nil)
+	_ = d.Enqueue(req1)
+
+	// Since Run isn't started, a blocking Enqueue would deadlock.
+	// An immediate 503 should be returned for the second request.
+	req2 := httptest.NewRequest("GET", "/test2", nil)
+	done := make(chan struct{})
+	var result2 Result
+	go func() {
+		resultChan2 := d.Enqueue(req2)
+		result2 = <-resultChan2
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Expected: Enqueue should have returned immediately with a 503.
+		if result2.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected status %d for full queue, got %d", http.StatusServiceUnavailable, result2.StatusCode)
+		}
+		if result2.Err == nil || result2.Err.Error() != "queue full" {
+			t.Fatalf("expected 'queue full' error, got %v", result2.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Enqueue blocked on full queue — deadlock detected")
+	}
+}
+
 // TestEnqueue_WithoutBody tests request without body
 func TestEnqueue_WithoutBody(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
