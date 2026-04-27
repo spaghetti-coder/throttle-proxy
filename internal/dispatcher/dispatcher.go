@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -230,7 +231,7 @@ func (d *Dispatcher) fireRequest(ctx context.Context, pr *proxyRequest, state *u
 	h := make(http.Header)
 	copyHeaders(h, resp.Header)
 	if len(resp.TransferEncoding) == 0 {
-		h.Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
+		h.Set("Content-Length", strconv.Itoa(len(respBody)))
 	}
 
 	return Result{StatusCode: resp.StatusCode, Header: h, Body: respBody}, nil
