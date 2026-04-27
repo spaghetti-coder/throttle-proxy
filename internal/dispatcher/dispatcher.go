@@ -21,6 +21,7 @@ var hopByHopHeaders = []string{
 	"Keep-Alive",
 	"Proxy-Authenticate",
 	"Proxy-Authorization",
+	"Proxy-Connection",
 	"TE",
 	"Trailers",
 	"Transfer-Encoding",

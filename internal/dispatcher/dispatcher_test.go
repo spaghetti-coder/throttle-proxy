@@ -299,6 +299,7 @@ func TestCopyHeaders_HopByHopExcluded(t *testing.T) {
 		"Connection":         []string{"close"},
 		"Keep-Alive":         []string{"timeout=5"},
 		"Proxy-Authenticate": []string{"Basic"},
+		"Proxy-Connection":   []string{"keep-alive"},
 		"X-Custom-Header":    []string{"value"},
 	}
 
@@ -322,6 +323,9 @@ func TestCopyHeaders_HopByHopExcluded(t *testing.T) {
 	}
 	if dst.Get("Proxy-Authenticate") != "" {
 		t.Error("expected Proxy-Authenticate to be excluded")
+	}
+	if dst.Get("Proxy-Connection") != "" {
+		t.Error("expected Proxy-Connection to be excluded")
 	}
 }
 
