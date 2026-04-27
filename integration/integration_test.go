@@ -206,8 +206,8 @@ func TestRoundRobinPassthrough(t *testing.T) {
 		handler.ServeHTTP(rr, req)
 	}
 
-	for i, count := range counts {
-		if c := count.Load(); c != 3 {
+	for i := range counts {
+		if c := counts[i].Load(); c != 3 {
 			t.Errorf("expected upstream %d to receive 3 requests, got %d", i, c)
 		}
 	}
