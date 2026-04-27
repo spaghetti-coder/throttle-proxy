@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -226,6 +227,39 @@ func TestEnqueue_AfterStop(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Enqueue blocked after dispatcher stopped — deadlock")
 	}
+}
+
+// TestEnqueue_ReadBodyError verifies Enqueue returns 400 when body read fails
+func TestEnqueue_ReadBodyError(t *testing.T) {
+	u, _ := url.Parse("http://localhost:8080")
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		QueueSize:       10,
+	}
+	d := New(cfg)
+
+	// Create a request with a body that returns an error on read
+	req := httptest.NewRequest("POST", "/test", &errorReader{err: fmt.Errorf("read failed")})
+
+	resultChan := d.Enqueue(req)
+	result := <-resultChan
+
+	if result.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected status 400 when body read fails, got %d", result.StatusCode)
+	}
+	if result.Err == nil || result.Err.Error() != "read failed" {
+		t.Fatalf("expected body read error, got %v", result.Err)
+	}
+}
+
+// errorReader is an io.Reader that always returns an error
+type errorReader struct {
+	err error
+}
+
+func (e *errorReader) Read(p []byte) (n int, err error) {
+	return 0, e.err
 }
 
 // TestEnqueue_WithoutBody tests request without body

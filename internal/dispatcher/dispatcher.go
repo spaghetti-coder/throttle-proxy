@@ -85,8 +85,14 @@ func New(cfg *config.Config) *Dispatcher {
 func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 	var bodyBytes []byte
 	if r.Body != nil {
-		bodyBytes, _ = io.ReadAll(r.Body)
+		var err error
+		bodyBytes, err = io.ReadAll(r.Body)
 		r.Body.Close()
+		if err != nil {
+			ch := make(chan Result, 1)
+			ch <- Result{StatusCode: http.StatusBadRequest, Err: err}
+			return ch
+		}
 	}
 
 	pr := &proxyRequest{
