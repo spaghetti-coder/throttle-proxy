@@ -79,6 +79,8 @@ func main() {
 		}
 	}
 
+	cancel()
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
@@ -86,6 +88,5 @@ func main() {
 		slog.Error("shutdown error", "err", err)
 	}
 
-	cancel()
 	slog.Info("stopped")
 }

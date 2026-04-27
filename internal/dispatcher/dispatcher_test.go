@@ -128,6 +128,61 @@ func TestEnqueue_FullQueue(t *testing.T) {
 	}
 }
 
+// TestRun_DrainsQueueOnShutdown verifies queued requests receive 503 during shutdown
+func TestRun_DrainsQueuedRequestsOnShutdown(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 30 * time.Second,
+		QueueSize:       10,
+	}
+	d := New(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go d.Run(ctx)
+
+	// Enqueue a request that will be picked up and block in fireRequest
+	req1 := httptest.NewRequest("GET", "/test", nil)
+	resultChan1 := d.Enqueue(req1)
+	// Give Run time to start dispatching req1
+	time.Sleep(50 * time.Millisecond)
+
+	// Enqueue another request that should remain in the queue buffer
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	resultChan2 := d.Enqueue(req2)
+
+	// Cancel context: Run should drain the remaining queued request(s)
+	cancel()
+
+	// req1's dispatch will ultimately fail (context cancelled)
+	select {
+	case result := <-resultChan1:
+		if result.Err == nil {
+			t.Fatalf("expected error for req1 after cancel, got none")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("req1 did not complete after cancel")
+	}
+
+	// req2 must be drained with a 503 instead of blocking forever
+	select {
+	case result := <-resultChan2:
+		if result.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503 for drained queued request, got %d", result.StatusCode)
+		}
+		if result.Err == nil || result.Err.Error() != "dispatcher shutting down" {
+			t.Fatalf("expected shutdown error, got %v", result.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued request was not drained on shutdown — deadlock")
+	}
+}
+
 // TestEnqueue_AfterStop verifies Enqueue returns 503 after dispatcher has stopped
 func TestEnqueue_AfterStop(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")

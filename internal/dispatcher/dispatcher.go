@@ -108,11 +108,21 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 
 // Run is the single dispatcher goroutine. It must be started exactly once.
 func (d *Dispatcher) Run(ctx context.Context) {
-	defer close(d.done)
+	defer func() {
+		// Drain any remaining queued requests after shutdown.
+		close(d.done)
+	}()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			for {
+				select {
+				case pr := <-d.queue:
+					pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("dispatcher shutting down")}
+				default:
+					return
+				}
+			}
 		case pr := <-d.queue:
 			d.dispatch(ctx, pr)
 		}
@@ -120,6 +130,13 @@ func (d *Dispatcher) Run(ctx context.Context) {
 }
 
 func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
+	select {
+	case <-ctx.Done():
+		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("dispatcher shutting down")}
+		return
+	default:
+	}
+
 	if pr.maxWait > 0 && time.Since(pr.enqueuedAt) >= pr.maxWait {
 		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("max wait exceeded")}
 		return
