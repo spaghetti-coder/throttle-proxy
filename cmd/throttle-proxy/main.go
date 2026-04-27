@@ -51,8 +51,7 @@ func main() {
 		Addr:        fmt.Sprintf(":%d", cfg.Port),
 		Handler:     handler,
 		ReadTimeout: 30 * time.Second,
-		// WriteTimeout is intentionally 0 (no timeout) because throttled requests
-		// may wait in the queue for an unbounded time when MAX_WAIT is disabled.
+		// WriteTimeout: 0 allows streaming and large responses; queue wait is separately controlled by MAX_WAIT.
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
