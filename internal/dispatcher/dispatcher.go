@@ -248,10 +248,13 @@ func copyHeaders(dst, src http.Header) {
 
 func setXForwardedFor(outReq *http.Request, inReq *http.Request) {
 	clientIP := inReq.RemoteAddr
-	if xff := inReq.Header.Get("X-Forwarded-For"); xff != "" {
-		clientIP = xff
-	} else if xri := inReq.Header.Get("X-Real-IP"); xri != "" {
+	if xri := inReq.Header.Get("X-Real-IP"); xri != "" {
 		clientIP = xri
 	}
-	outReq.Header.Set("X-Forwarded-For", clientIP)
+
+	if xff := inReq.Header.Get("X-Forwarded-For"); xff != "" {
+		outReq.Header.Set("X-Forwarded-For", xff+", "+clientIP)
+	} else {
+		outReq.Header.Set("X-Forwarded-For", clientIP)
+	}
 }
