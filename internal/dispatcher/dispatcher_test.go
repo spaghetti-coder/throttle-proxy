@@ -585,12 +585,18 @@ func TestDispatch_MaxWaitTimeout(t *testing.T) {
 
 // TestDispatch_ContextCancellation tests context cancellation
 func TestDispatch_ContextCancellation(t *testing.T) {
-	// Create a test server that will block
+	// Create a test server that will block until context is cancelled or test ends
+	done := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Block until context is cancelled
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-done:
+		}
 	}))
-	defer upstream.Close()
+	defer func() {
+		close(done)
+		upstream.Close()
+	}()
 
 	u, _ := url.Parse(upstream.URL)
 	cfg := &config.Config{
@@ -613,10 +619,10 @@ func TestDispatch_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Start dispatch in goroutine
-	done := make(chan bool)
+	dispatchDone := make(chan bool)
 	go func() {
 		d.dispatch(ctx, pr)
-		done <- true
+		dispatchDone <- true
 	}()
 
 	// Cancel context after short delay
@@ -624,7 +630,7 @@ func TestDispatch_ContextCancellation(t *testing.T) {
 	cancel()
 
 	// Wait for dispatch to complete
-	<-done
+	<-dispatchDone
 
 	result := <-pr.resultChan
 	// Context cancellation during request returns 502 from fireRequest
