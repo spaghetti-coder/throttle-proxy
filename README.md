@@ -1,78 +1,128 @@
-# Throttle proxy
+# throttle-proxy
 
-A lightweight Go reverse proxy that serializes requests to upstream servers using Earliest Deadline First (EDF) scheduling.
+A lightweight Go reverse proxy that protects upstream services from request floods by serializing and throttling requests.
 
-## Description
+It sits between clients and upstream servers, ensuring that at most one request is in-flight at any given time per upstream. Requests are queued and dispatched using Earliest Deadline First (EDF) scheduling with configurable, randomized delays. Under sustained high-frequency load, delays automatically escalate to avoid triggering upstream rate limits.
 
-Throttle proxy is designed to protect upstream services from request floods by queuing and throttling incoming requests. Primary use cases include:
+## When to use
 
-- **SearxNG**: Throttle requests to avoid overwhelming search backends
-- **General**: Rate-limit requests to a site or specific endpoints
+- **AI agent integrations**: Your agent can issue dozens parallel `curl` requests to a meta-search engine (e.g., [SearxNG](https://docs.searxng.org/)). The backend proxies them to Google, Bing, DuckDuckGo, which detect simultaneous requests and ban your IP. `throttle-proxy` serializes these requests, adds human-like jitter between them, and gradually backs off if the load pattern persists.
+- **Scraping protection**: You need to enforce a strict "one request at a time" policy to a fragile or rate-limited API, with automatic delay escalation when the upstream signals it is unhappy.
+- **General rate-limiting**: Any scenario where you want to queue and throttle requests to specific endpoints while letting others pass through unaffected.
 
 ## Features
 
-- Request throttling with configurable delay ranges
-- EDF (Earliest Deadline First) scheduling for fair request distribution
-- Round-robin passthrough for non-throttled endpoints
-- Upstream health tracking with exponential backoff
-- Thread-safe implementation
-- Zero external dependencies
-- Docker-ready with multi-stage build
+- **Request serialization**: At most one in-flight request per upstream at any time
+- **EDF scheduling**: Earliest Deadline First dispatch across multiple upstreams
+- **Automatic delay escalation**: Gradually increases delays under sustained high-frequency load
+- **Round-robin passthrough**: Non-throttled endpoints bypass the queue entirely
+- **Upstream health tracking**: Automatic failover and exponential backoff on 5xx/timeout
+- **Thread-safe queue**: Configurable max size with wait-time limits
+- **Zero dependencies**: Pure Go 1.24, ~single binary
+- **Docker-ready**: Multi-stage build, multi-platform (`linux/amd64`, `linux/arm64`)
 
 ## Quick Start
 
 ```bash
-docker run -p 8080:8080 -e UPSTREAM=http://localhost:9000 ghcr.io/spaghetti-coder/throttle-proxy:latest
+docker run -p 8080:8080 \
+  -e UPSTREAM=http://localhost:9000 \
+  ghcr.io/spaghetti-coder/throttle-proxy:latest
+```
+
+For persistent configuration, copy [`compose.yaml`](compose.yaml) to your project, edit the environment variables, and run:
+
+```bash
+docker compose up -d
 ```
 
 ## Configuration
 
-<details><summary>Env variables</summary>
+### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `UPSTREAM` | *(required)* | Comma-separated upstream URLs (`http://host:port`) |
 | `PORT` | `8080` | HTTP server port |
-| `UPSTREAM` | (required) | Comma-separated upstream URLs |
-| `UPSTREAM_TIMEOUT` | `5` | Upstream timeout in seconds |
+| `UPSTREAM_TIMEOUT` | `5` | Upstream fetch timeout (seconds) |
 | `DELAY_MIN` | `0` | Minimum delay between requests (seconds) |
 | `DELAY_MAX` | `0` | Maximum delay between requests (seconds) |
-| `MAX_WAIT` | `0` | Maximum queue wait time (seconds, 0 = unlimited) |
-| `ESCALATE_DELAY_AFTER` | `0` | Increase delay after N failures |
-| `ESCALATE_DELAY_MAX_COUNT` | `3` | Maximum delay escalation count |
-| `ENDPOINTS` | `/` | Comma-separated endpoint prefixes to throttle |
-| `QUEUE_SIZE` | `10000` | Maximum queue size (min: 100) |
-</details>
+| `MAX_WAIT` | `0` | Max time a request can wait in queue — returns 503 if exceeded (`0` = unlimited) |
+| `ESCALATE_DELAY_AFTER` | `0` | Under sustained high-frequency load, trigger delay escalation after this many requests (`0` = disabled) |
+| `ESCALATE_DELAY_MAX_COUNT` | `3` | Maximum delay escalation steps (`0` = unlimited) |
+| `ENDPOINTS` | `/` | Comma-separated endpoint prefixes to throttle. Prefix-matched: `/search` matches `/search` and `/search/foo`, but not `/searches` |
+| `QUEUE_SIZE` | `10000` | Max queue size. Minimum: `100`; values below `100` are raised to `100`. Special: `0` = `10000` |
 
-## Architecture
+### Example: SearxNG with conservative delays
 
-Throttle proxy sits between clients and upstream servers, queuing requests and dispatching them based on EDF scheduling. Requests matching configured endpoints are throttled; others pass through via round-robin.
+```bash
+docker run -p 8080:8080 \
+  -e UPSTREAM=http://searxng:8080 \
+  -e DELAY_MIN=5 \
+  -e DELAY_MAX=9 \
+  -e ESCALATE_DELAY_AFTER=3 \
+  -e ESCALATE_DELAY_MAX_COUNT=6 \
+  -e ENDPOINTS=/search,/images \
+  ghcr.io/spaghetti-coder/throttle-proxy:latest
+```
 
-See [spec.md](spec.md) for detailed architecture documentation.
+In this setup:
+- Each upstream waits 5–9 seconds between requests.
+- If 3 requests arrive within a tight window, delays escalate by 1.5–2x.
+- The escalation can repeat up to 6 times before capping.
+- Only `/search` and `/images` are throttled; everything else passes straight through.
+
+## How it works
+
+1. **Queue**: Incoming requests matching `ENDPOINTS` are placed in a thread-safe queue.
+2. **EDF dispatch**: For multiple upstreams, the proxy picks the one with the earliest available deadline, waits if necessary, then forwards the request.
+3. **Per-upstream state**: Each upstream tracks its own `next_min_ts` and escalation window independently.
+4. **Failover**: If an upstream times out or returns 5xx, the request is retried on the next available upstream.
+5. **Escalation**: When sustained load is detected (configured via `ESCALATE_DELAY_AFTER`), delays increase multiplicatively to stay under upstream radar.
+6. **Passthrough**: Requests that do not match any `ENDPOINTS` prefix skip the queue and are forwarded immediately via round-robin.
+
+For the full algorithmic specification — including exact escalation formulas, sliding window semantics, and multi-upstream retry logic — see [`spec.md`](spec.md).
 
 ## Installation
 
 ### Docker
 
-Clone [`compose.yaml`](compose.yaml), edit and `docker compose up -d`.
+Pull the latest image:
 
-<details><summary>Manual docker image build</summary>
+```bash
+docker pull ghcr.io/spaghetti-coder/throttle-proxy:latest
+```
+
+Or build manually:
 
 ```bash
 docker build -t throttle-proxy:latest .
 ```
 
-The image supports multi-platform builds (linux/amd64, linux/arm64) when using Docker Buildx:
+Multi-platform build with Docker Buildx:
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 -t throttle-proxy:latest .
 ```
-</details>
 
 ### Go
+
+Requires Go 1.24+.
 
 ```bash
 git clone https://github.com/spaghetti-coder/throttle-proxy.git
 cd throttle-proxy
 go build -o throttle-proxy ./cmd/throttle-proxy
 ./throttle-proxy
+```
+
+## Testing
+
+```bash
+go test ./...
+```
+
+Integration tests cover sequential processing, upstream failover, endpoint matching, and round-robin passthrough:
+
+```bash
+go test ./integration/...
 ```
