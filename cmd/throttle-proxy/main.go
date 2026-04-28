@@ -47,13 +47,13 @@ func main() {
 	disp := dispatcher.New(cfg)
 	handler := proxy.NewHandler(cfg, disp)
 
-		srv := &http.Server{
-			Addr:        fmt.Sprintf(":%d", cfg.Port),
-			Handler:     handler,
-			ReadTimeout: 30 * time.Second,
-			IdleTimeout: 120 * time.Second,
-			// WriteTimeout: 0 allows streaming and large responses; queue wait is separately controlled by MAX_WAIT.
-		}
+	srv := &http.Server{
+		Addr:        fmt.Sprintf(":%d", cfg.Port),
+		Handler:     handler,
+		ReadTimeout: 30 * time.Second,
+		IdleTimeout: 120 * time.Second,
+		// WriteTimeout: 0 allows streaming and large responses; queue wait is separately controlled by MAX_WAIT.
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -61,9 +61,9 @@ func TestLoad_UpstreamParsing(t *testing.T) {
 			wantFirst: "http://localhost:8080",
 		},
 		{
-			name:      "invalid scheme",
-			upstream:  "ftp://example.com",
-			wantErr:   true,
+			name:           "invalid scheme",
+			upstream:       "ftp://example.com",
+			wantErr:        true,
 			wantErrContain: "scheme must be http or https",
 		},
 	}

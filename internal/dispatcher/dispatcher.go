@@ -15,6 +15,7 @@ import (
 
 	"throttle-proxy/internal/config"
 	"throttle-proxy/internal/upstream"
+	"throttle-proxy/internal/xforwarded"
 )
 
 var hopByHopHeaders = []string{
@@ -52,7 +53,6 @@ type Dispatcher struct {
 	queue   chan *proxyRequest
 	client  *http.Client
 	rng     *rand.Rand
-	done    chan struct{}
 	running atomic.Bool
 }
 
@@ -80,7 +80,6 @@ func New(cfg *config.Config) *Dispatcher {
 		queue:  make(chan *proxyRequest, queueSize),
 		client: client,
 		rng:    rand.New(rand.NewSource(time.Now().UnixNano())),
-		done:   make(chan struct{}),
 	}
 }
 
@@ -124,7 +123,6 @@ func (d *Dispatcher) Run(ctx context.Context) {
 	defer func() {
 		// Drain any remaining queued requests after shutdown.
 		d.running.Store(false)
-		close(d.done)
 	}()
 	for {
 		select {
@@ -215,7 +213,7 @@ func (d *Dispatcher) fireRequest(ctx context.Context, pr *proxyRequest, state *u
 	outReq.Host = state.URL.Host
 
 	copyHeaders(outReq.Header, pr.r.Header)
-	setXForwardedFor(outReq, pr.r)
+	xforwarded.SetXForwardedFor(outReq, pr.r)
 
 	resp, err := d.client.Do(outReq)
 	if err != nil {
@@ -253,18 +251,5 @@ func copyHeaders(dst, src http.Header) {
 			continue
 		}
 		dst[k] = append(dst[k], vs...)
-	}
-}
-
-func setXForwardedFor(outReq *http.Request, inReq *http.Request) {
-	clientIP := inReq.RemoteAddr
-	if xri := inReq.Header.Get("X-Real-IP"); xri != "" {
-		clientIP = xri
-	}
-
-	if xff := inReq.Header.Get("X-Forwarded-For"); xff != "" {
-		outReq.Header.Set("X-Forwarded-For", xff+", "+clientIP)
-	} else {
-		outReq.Header.Set("X-Forwarded-For", clientIP)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"throttle-proxy/internal/config"
 	"throttle-proxy/internal/dispatcher"
+	"throttle-proxy/internal/xforwarded"
 )
 
 // Handler routes requests to the dispatcher (throttled) or direct passthrough.
@@ -26,15 +27,7 @@ func NewHandler(cfg *config.Config, disp *dispatcher.Dispatcher) *Handler {
 			Rewrite: func(req *httputil.ProxyRequest) {
 				req.SetURL(target)
 				req.Out.Host = target.Host
-				clientIP := req.In.RemoteAddr
-				if xri := req.In.Header.Get("X-Real-IP"); xri != "" {
-					clientIP = xri
-				}
-				if xff := req.In.Header.Get("X-Forwarded-For"); xff != "" {
-					req.Out.Header.Set("X-Forwarded-For", xff+", "+clientIP)
-				} else {
-					req.Out.Header.Set("X-Forwarded-For", clientIP)
-				}
+				xforwarded.SetXForwardedFor(req.Out, req.In)
 			},
 		}
 	}
