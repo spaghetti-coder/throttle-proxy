@@ -32,7 +32,7 @@ Requests in the queue are kept with their original content (including body) and 
 
 With a single upstream the behavior is straightforward. Multi-upstream needs some clarification.
 
-Each upstream maintains its own `next_min_ts` — the earliest timestamp at which the next request to that upstream is allowed to fire. It is updated after each request completes: `next_min_ts = request_done_ts + rand(DELAY_MIN, DELAY_MAX)`. While `DELAY_MIN` and `DELAY_MAX` are in seconds, `next_min_ts` is in milliseconds to simulate human behavior.
+Each upstream maintains its own `next_min_ts` — the earliest timestamp at which the next request to that upstream is allowed to fire. It is updated after each request completes: `next_min_ts = request_done_ts + rand(DELAY)`. While `DELAY` is in seconds, `next_min_ts` is in milliseconds to simulate human behavior. `DELAY` supports constants (`DELAY=5`) or ranges (`DELAY=5:9`). If max < min, max = min.
 
 The dispatcher uses Earliest Deadline First (EDF): pick the upstream with the lowest `next_min_ts`, wait until that time, then fire.
 
@@ -53,22 +53,24 @@ Each upstream maintains its own escalation state (current `DELAY_MIN`, `DELAY_MA
 The sliding window stores metadata for each request, including its timestamp and the `escalationCount` active at the time of the request.
 
 Escalation is triggered when the following conditions are met:
-1. The window contains at least `ESCALATE_DELAY_AFTER - 1` requests.
+1. The window contains at least `ESCALATE_AFTER - 1` requests.
 2. The oldest request in the window has the same `escalationCount` as the current state (ensuring escalation happens per generation).
-3. The span between the oldest and the newest request in the window is less than or equal to `DELAY_MAX * ESCALATE_DELAY_AFTER`.
+3. The span between the oldest and the newest request in the window is less than or equal to `DELAY_MAX * ESCALATE_AFTER`.
 
 When triggered, delays are escalated:
 
 ```
-DELAY_MIN = DELAY_MIN * rand(1.5, 2)
+DELAY_MIN = DELAY_MIN * rand(ESCALATE_FACTOR)
 DELAY_MAX = DELAY_MAX + DELAY_MIN - OLD_DELAY_MIN
 ```
 
+`ESCALATE_FACTOR` is configurable via environment variable, supporting constant (`ESCALATE_FACTOR=1.5`) or range (`ESCALATE_FACTOR=1.5:2.0`) syntax. Default: `1.5:2.0`.
+
 The jitter window (`DELAY_MAX - DELAY_MIN`) is preserved across escalations.
 
-`ESCALATE_DELAY_MAX_COUNT` caps the number of escalation steps (default: 3, 0 = unlimited).
+`ESCALATE_MAX_COUNT` caps the number of escalation steps (default: 3, 0 = unlimited).
 
-**Reset**: when the span between the oldest and newest request in the window exceeds `DELAY_MAX * ESCALATE_DELAY_AFTER`, delays reset to their initial values and the sliding window is cleared.
+**Reset**: when the span between the oldest and newest request in the window exceeds `DELAY_MAX * ESCALATE_AFTER`, delays reset to their initial values and the sliding window is cleared.
 
 ## Endpoints
 

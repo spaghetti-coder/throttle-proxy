@@ -22,20 +22,23 @@ services:
       # Upstream fetch timeout in seconds (default: 5)
       - UPSTREAM_TIMEOUT=7
 
-      # Delay range in seconds, (default: 0 for both = no delay).
-      # DELAY_MAX < DELAY_MIN => DELAY_MAX = DELAY_MIN
-      - DELAY_MIN=5
-      - DELAY_MAX=9
+      # Delay between requests in seconds (default: 0 = no delay).
+      # Supports constant or range: DELAY=5 or DELAY=0.5:2
+      - DELAY=5:9
 
-      # Gradually increase delays under sustained high-frequency requests.
+      # Gradually increase delays under sustained high-frequency requests (default 0 = disabled).
       # After escalation:
-      #   DELAY_MIN = DELAY_MIN * rand(1.5, 2)
+      #   DELAY_MIN = DELAY_MIN * ESCALATE_FACTOR
       #   DELAY_MAX = DELAY_MAX + DELAY_MIN - OLD_DELAY_MIN
-      # (default 0 = disabled)
-      - ESCALATE_DELAY_AFTER=3
+      - ESCALATE_AFTER=3
+
+      # Delay multiplier on each escalation step (default 1.5:2.0).
+      # Supports constant or range: ESCALATE_FACTOR=1.5 or ESCALATE_FACTOR=1.5:2.0
+      # - ESCALATE_FACTOR=1.5:2.0
+
       # Max number of delay escalation steps (default: 3, 0 = unlimited).
       # NOTE: don't go too high!
-      - ESCALATE_DELAY_MAX_COUNT=6
+      - ESCALATE_MAX_COUNT=6
 
       # Endpoints to throttle, prefix-matched (default: '/' = all).
       # - ENDPOINTS=/foo,/bar/baz
@@ -46,10 +49,10 @@ services:
 
 
 # ~~~ Sanity test ~~~
-  #     - DELAY_MIN=0.1
-  #     - DELAY_MAX=0.1
-  #     - ESCALATE_DELAY_AFTER=3
-  #     - ESCALATE_DELAY_MAX_COUNT=4
+  #     - DELAY=0.1
+  #     - ESCALATE_AFTER=3
+  #     - ESCALATE_FACTOR=2.0
+  #     - ESCALATE_MAX_COUNT=4
   # upstream: { image: nginx:alpine }
 
 # for i in {0..40}; do

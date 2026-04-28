@@ -44,11 +44,11 @@ docker compose up -d
 | `UPSTREAM` | *(required)* | Comma-separated upstream URLs (`http://host:port`) |
 | `PORT` | `8080` | HTTP server port |
 | `UPSTREAM_TIMEOUT` | `5` | Upstream fetch timeout (seconds) |
-| `DELAY_MIN` | `0` | Minimum delay between requests (seconds) |
-| `DELAY_MAX` | `0` | Maximum delay between requests (seconds) |
+| `DELAY` | `0` | Delay between requests (seconds). Supports `min:max` range: `DELAY=0.5:2`. If max < min, max = min |
 | `MAX_WAIT` | `0` | Max time a request can wait in queue — returns 503 if exceeded (`0` = unlimited) |
-| `ESCALATE_DELAY_AFTER` | `0` | Under sustained high-frequency load, trigger delay escalation after this many requests (`0` = disabled) |
-| `ESCALATE_DELAY_MAX_COUNT` | `3` | Maximum delay escalation steps (`0` = unlimited) |
+| `ESCALATE_AFTER` | `0` | Under sustained high-frequency load, trigger delay escalation after this many requests (`0` = disabled) |
+| `ESCALATE_MAX_COUNT` | `3` | Maximum delay escalation steps (`0` = unlimited) |
+| `ESCALATE_FACTOR` | `1.5:2.0` | Delay multiplier on each escalation step. Supports constant (`1.5`) or range (`1.5:2.0`) |
 | `ENDPOINTS` | `/` | Comma-separated endpoint prefixes to throttle. Prefix-matched: `/search` matches `/search` and `/search/foo`, but not `/searches` |
 | `QUEUE_SIZE` | `10000` | Max queue size. Minimum: `100`; values below `100` are raised to `100`. Special: `0` = `10000` |
 
@@ -57,17 +57,16 @@ docker compose up -d
 ```bash
 docker run -p 8080:8080 \
   -e UPSTREAM=http://searxng:8080 \
-  -e DELAY_MIN=5 \
-  -e DELAY_MAX=9 \
-  -e ESCALATE_DELAY_AFTER=3 \
-  -e ESCALATE_DELAY_MAX_COUNT=6 \
+  -e DELAY=5:9 \
+  -e ESCALATE_AFTER=3 \
+  -e ESCALATE_MAX_COUNT=6 \
   -e ENDPOINTS=/search,/images \
   ghcr.io/spaghetti-coder/throttle-proxy:latest
 ```
 
 In this setup:
 - Each upstream waits 5–9 seconds between requests.
-- If 3 requests arrive within a tight window, delays escalate by 1.5–2x.
+- If 3 requests arrive within a tight window, delays escalate by `ESCALATE_FACTOR`.
 - The escalation can repeat up to 6 times before capping.
 - Only `/search` and `/images` are throttled; everything else passes straight through.
 
@@ -77,7 +76,7 @@ In this setup:
 2. **EDF dispatch**: For multiple upstreams, the proxy picks the one with the earliest available deadline, waits if necessary, then forwards the request.
 3. **Per-upstream state**: Each upstream tracks its own `next_min_ts` and escalation window independently.
 4. **Failover**: If an upstream times out or returns 5xx, the request is retried on the next available upstream.
-5. **Escalation**: When sustained load is detected (configured via `ESCALATE_DELAY_AFTER`), delays increase multiplicatively to stay under upstream radar.
+5. **Escalation**: When sustained load is detected (configured via `ESCALATE_AFTER`), delays increase multiplicatively (by `ESCALATE_FACTOR`) to stay under upstream radar.
 6. **Passthrough**: Requests that do not match any `ENDPOINTS` prefix skip the queue and are forwarded immediately via round-robin.
 
 For the full algorithmic specification — including exact escalation formulas, sliding window semantics, and multi-upstream retry logic — see [`spec.md`](spec.md).

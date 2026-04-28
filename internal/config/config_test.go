@@ -6,9 +6,13 @@ import (
 	"time"
 )
 
+func envLookup(env map[string]string) func(string) string {
+	return func(k string) string { return env[k] }
+}
+
 // TestLoad_RequiredEnv tests that UPSTREAM is required
 func TestLoad_RequiredEnv(t *testing.T) {
-	_, err := Load(func(string) string { return "" })
+	_, err := Load(envLookup(map[string]string{"UPSTREAM": ""}))
 	if err == nil {
 		t.Error("expected error for missing UPSTREAM, got nil")
 	}
@@ -58,7 +62,7 @@ func TestLoad_UpstreamParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := Load(func(k string) string { return tt.env[k] })
+			cfg, err := Load(envLookup(tt.env))
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("expected error, got nil")
@@ -85,10 +89,7 @@ func TestLoad_UpstreamParsing(t *testing.T) {
 
 // TestLoad_DefaultValues tests default values
 func TestLoad_DefaultValues(t *testing.T) {
-	cfg, err := Load(func(k string) string {
-		env := map[string]string{"UPSTREAM": "http://localhost:8080"}
-		return env[k]
-	})
+	cfg, err := Load(envLookup(map[string]string{"UPSTREAM": "http://localhost:8080"}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -102,11 +103,178 @@ func TestLoad_DefaultValues(t *testing.T) {
 	if cfg.DelayMin != 0 {
 		t.Errorf("expected default DelayMin 0, got %v", cfg.DelayMin)
 	}
+	if cfg.DelayMax != 0 {
+		t.Errorf("expected default DelayMax 0, got %v", cfg.DelayMax)
+	}
 	if cfg.EscalateMaxCount != 3 {
 		t.Errorf("expected default EscalateMaxCount 3, got %d", cfg.EscalateMaxCount)
 	}
+	if cfg.EscalateFactorMin != 1.5 {
+		t.Errorf("expected default EscalateFactorMin 1.5, got %f", cfg.EscalateFactorMin)
+	}
+	if cfg.EscalateFactorMax != 2.0 {
+		t.Errorf("expected default EscalateFactorMax 2.0, got %f", cfg.EscalateFactorMax)
+	}
 	if len(cfg.Endpoints) != 1 || cfg.Endpoints[0] != "/" {
 		t.Errorf("expected default Endpoints [\"/\"], got %v", cfg.Endpoints)
+	}
+}
+
+// TestLoad_DelayRange tests DELAY variable parsing
+func TestLoad_DelayRange(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        map[string]string
+		wantMin    time.Duration
+		wantMax    time.Duration
+		wantErr    bool
+		wantErrStr string
+	}{
+		{
+			name:    "constant delay",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "5"},
+			wantMin: 5 * time.Second,
+			wantMax: 5 * time.Second,
+		},
+		{
+			name:    "range delay",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "0.5:2"},
+			wantMin: 500 * time.Millisecond,
+			wantMax: 2 * time.Second,
+		},
+		{
+			name:    "max less than min clamp",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "5:3"},
+			wantMin: 5 * time.Second,
+			wantMax: 5 * time.Second,
+		},
+		{
+			name:    "default delay",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080"},
+			wantMin: 0,
+			wantMax: 0,
+		},
+		{
+			name:       "invalid delay",
+			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "foo"},
+			wantErr:    true,
+			wantErrStr: "DELAY must be a number",
+		},
+		{
+			name:       "multiple colons",
+			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "1:2:3"},
+			wantErr:    true,
+			wantErrStr: "must have at most one colon",
+		},
+		{
+			name:       "negative delay",
+			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "-1"},
+			wantErr:    true,
+			wantErrStr: "must not be negative",
+		},
+		{
+			name:       "negative delay max",
+			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "1:-2"},
+			wantErr:    true,
+			wantErrStr: "must not be negative",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Load(envLookup(tt.env))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.wantErrStr) {
+					t.Errorf("expected error containing %q, got %v", tt.wantErrStr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.DelayMin != tt.wantMin {
+				t.Errorf("expected DelayMin %v, got %v", tt.wantMin, cfg.DelayMin)
+			}
+			if cfg.DelayMax != tt.wantMax {
+				t.Errorf("expected DelayMax %v, got %v", tt.wantMax, cfg.DelayMax)
+			}
+		})
+	}
+}
+
+// TestLoad_EscalateFactor tests ESCALATE_FACTOR variable parsing
+func TestLoad_EscalateFactor(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        map[string]string
+		wantMin    float64
+		wantMax    float64
+		wantErr    bool
+		wantErrStr string
+	}{
+		{
+			name:    "constant factor",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5"},
+			wantMin: 1.5,
+			wantMax: 1.5,
+		},
+		{
+			name:    "range factor",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:2.0"},
+			wantMin: 1.5,
+			wantMax: 2.0,
+		},
+		{
+			name:    "default factor",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080"},
+			wantMin: 1.5,
+			wantMax: 2.0,
+		},
+		{
+			name:    "max less than min clamp",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "2.0:1.5"},
+			wantMin: 2.0,
+			wantMax: 2.0,
+		},
+		{
+			name:       "multiple colons",
+			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:2.0:3.0"},
+			wantErr:    true,
+			wantErrStr: "must have at most one colon",
+		},
+		{
+			name:       "invalid factor",
+			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "foo"},
+			wantErr:    true,
+			wantErrStr: "ESCALATE_FACTOR must be a number",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Load(envLookup(tt.env))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.wantErrStr) {
+					t.Errorf("expected error containing %q, got %v", tt.wantErrStr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.EscalateFactorMin != tt.wantMin {
+				t.Errorf("expected EscalateFactorMin %v, got %v", tt.wantMin, cfg.EscalateFactorMin)
+			}
+			if cfg.EscalateFactorMax != tt.wantMax {
+				t.Errorf("expected EscalateFactorMax %v, got %v", tt.wantMax, cfg.EscalateFactorMax)
+			}
+		})
 	}
 }
 
@@ -157,9 +325,4 @@ func TestMatchesEndpoints(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Helper functions
-func envLookup(env map[string]string) func(string) string {
-	return func(k string) string { return env[k] }
 }

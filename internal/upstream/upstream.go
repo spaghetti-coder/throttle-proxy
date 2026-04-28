@@ -28,18 +28,28 @@ type State struct {
 	baseDelayMax     time.Duration
 	escalateAfter    int
 	escalateMaxCount int
+	escalateFactorMin float64
+	escalateFactorMax float64
 }
 
 func NewState(u *url.URL, cfg *config.Config) *State {
+	factorMin := cfg.EscalateFactorMin
+	factorMax := cfg.EscalateFactorMax
+	if factorMin == 0 && factorMax == 0 {
+		factorMin, factorMax = 1.5, 2.0
+	}
+
 	return &State{
-		URL:              u,
-		nextMinTs:        time.Now(),
-		currentDelayMin:  cfg.DelayMin,
-		currentDelayMax:  cfg.DelayMax,
-		baseDelayMin:     cfg.DelayMin,
-		baseDelayMax:     cfg.DelayMax,
-		escalateAfter:    cfg.EscalateAfter,
-		escalateMaxCount: cfg.EscalateMaxCount,
+		URL:               u,
+		nextMinTs:         time.Now(),
+		currentDelayMin:   cfg.DelayMin,
+		currentDelayMax:   cfg.DelayMax,
+		baseDelayMin:      cfg.DelayMin,
+		baseDelayMax:      cfg.DelayMax,
+		escalateAfter:     cfg.EscalateAfter,
+		escalateMaxCount:  cfg.EscalateMaxCount,
+		escalateFactorMin: factorMin,
+		escalateFactorMax: factorMax,
 	}
 }
 
@@ -92,7 +102,7 @@ func (s *State) checkEscalation(rng *rand.Rand) {
 
 	// Escalation
 	oldMin := s.currentDelayMin
-	factor := 1.5 + rng.Float64()*0.5
+	factor := s.escalateFactorMin + rng.Float64()*(s.escalateFactorMax-s.escalateFactorMin)
 	s.currentDelayMin = time.Duration(float64(oldMin) * factor)
 	s.currentDelayMax = s.currentDelayMax + s.currentDelayMin - oldMin
 	s.escalationCount++

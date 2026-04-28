@@ -10,16 +10,18 @@ import (
 )
 
 type Config struct {
-	Port             int
-	Upstreams        []*url.URL
-	UpstreamTimeout  time.Duration
-	DelayMin         time.Duration
-	DelayMax         time.Duration
-	MaxWait          time.Duration
-	EscalateAfter    int
-	EscalateMaxCount int
-	Endpoints        []string
-	QueueSize        int
+	Port              int
+	Upstreams         []*url.URL
+	UpstreamTimeout   time.Duration
+	DelayMin          time.Duration
+	DelayMax          time.Duration
+	MaxWait           time.Duration
+	EscalateAfter     int
+	EscalateMaxCount  int
+	EscalateFactorMin float64
+	EscalateFactorMax float64
+	Endpoints         []string
+	QueueSize         int
 }
 
 func Load(lookup func(string) string) (*Config, error) {
@@ -63,12 +65,7 @@ func Load(lookup func(string) string) (*Config, error) {
 		return nil, err
 	}
 
-	cfg.DelayMin, err = envSeconds("DELAY_MIN", 0, lookup)
-	if err != nil {
-		return nil, err
-	}
-
-	cfg.DelayMax, err = envSeconds("DELAY_MAX", 0, lookup)
+	cfg.DelayMin, cfg.DelayMax, err = envSecondsRange("DELAY", 0, 0, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -82,12 +79,17 @@ func Load(lookup func(string) string) (*Config, error) {
 		return nil, err
 	}
 
-	cfg.EscalateAfter, err = envInt("ESCALATE_DELAY_AFTER", 0, lookup)
+	cfg.EscalateAfter, err = envInt("ESCALATE_AFTER", 0, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.EscalateMaxCount, err = envInt("ESCALATE_DELAY_MAX_COUNT", 3, lookup)
+	cfg.EscalateMaxCount, err = envInt("ESCALATE_MAX_COUNT", 3, lookup)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.EscalateFactorMin, cfg.EscalateFactorMax, err = envFloatRange("ESCALATE_FACTOR", 1.5, 2.0, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -156,4 +158,62 @@ func envSeconds(name string, defaultVal float64, lookup func(string) string) (ti
 		return 0, fmt.Errorf("%s must be a number: %w", name, err)
 	}
 	return time.Duration(v * float64(time.Second)), nil
+}
+
+func envSecondsRange(name string, defaultMin, defaultMax float64, lookup func(string) string) (min, max time.Duration, err error) {
+	s := strings.TrimSpace(lookup(name))
+	if s == "" {
+		return time.Duration(defaultMin * float64(time.Second)), time.Duration(defaultMax * float64(time.Second)), nil
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) > 2 {
+		return 0, 0, fmt.Errorf("%s must have at most one colon", name)
+	}
+	fmin, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s must be a number: %w", name, err)
+	}
+	if fmin < 0 {
+		return 0, 0, fmt.Errorf("%s must not be negative", name)
+	}
+	fmax := fmin
+	if len(parts) > 1 {
+		fmax, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("%s max must be a number: %w", name, err)
+		}
+		if fmax < 0 {
+			return 0, 0, fmt.Errorf("%s max must not be negative", name)
+		}
+	}
+	if fmax < fmin {
+		fmax = fmin
+	}
+	return time.Duration(fmin * float64(time.Second)), time.Duration(fmax * float64(time.Second)), nil
+}
+
+func envFloatRange(name string, defaultMin, defaultMax float64, lookup func(string) string) (min, max float64, err error) {
+	s := strings.TrimSpace(lookup(name))
+	if s == "" {
+		return defaultMin, defaultMax, nil
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) > 2 {
+		return 0, 0, fmt.Errorf("%s must have at most one colon", name)
+	}
+	min, err = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s must be a number: %w", name, err)
+	}
+	max = min
+	if len(parts) > 1 {
+		max, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("%s max must be a number: %w", name, err)
+		}
+	}
+	if max < min {
+		max = min
+	}
+	return min, max, nil
 }
