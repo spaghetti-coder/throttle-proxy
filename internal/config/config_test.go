@@ -1,19 +1,14 @@
 package config
 
 import (
-	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
 // TestLoad_RequiredEnv tests that UPSTREAM is required
 func TestLoad_RequiredEnv(t *testing.T) {
-	origUpstream := os.Getenv("UPSTREAM")
-	defer os.Setenv("UPSTREAM", origUpstream)
-
-	os.Unsetenv("UPSTREAM")
-
-	_, err := Load()
+	_, err := Load(func(string) string { return "" })
 	if err == nil {
 		t.Error("expected error for missing UPSTREAM, got nil")
 	}
@@ -24,16 +19,9 @@ func TestLoad_RequiredEnv(t *testing.T) {
 
 // TestLoad_UpstreamParsing tests upstream URL parsing
 func TestLoad_UpstreamParsing(t *testing.T) {
-	origUpstream := os.Getenv("UPSTREAM")
-	origPort := os.Getenv("PORT")
-	defer func() {
-		os.Setenv("UPSTREAM", origUpstream)
-		os.Setenv("PORT", origPort)
-	}()
-
 	tests := []struct {
 		name           string
-		upstream       string
+		env            map[string]string
 		wantErr        bool
 		wantErrContain string
 		wantCount      int
@@ -41,28 +29,28 @@ func TestLoad_UpstreamParsing(t *testing.T) {
 	}{
 		{
 			name:      "single http upstream",
-			upstream:  "http://localhost:8080",
+			env:       map[string]string{"UPSTREAM": "http://localhost:8080"},
 			wantErr:   false,
 			wantCount: 1,
 			wantFirst: "http://localhost:8080",
 		},
 		{
 			name:      "single https upstream",
-			upstream:  "https://example.com",
+			env:       map[string]string{"UPSTREAM": "https://example.com"},
 			wantErr:   false,
 			wantCount: 1,
 			wantFirst: "https://example.com",
 		},
 		{
 			name:      "multiple upstreams",
-			upstream:  "http://localhost:8080, https://example.com",
+			env:       map[string]string{"UPSTREAM": "http://localhost:8080, https://example.com"},
 			wantErr:   false,
 			wantCount: 2,
 			wantFirst: "http://localhost:8080",
 		},
 		{
 			name:           "invalid scheme",
-			upstream:       "ftp://example.com",
+			env:            map[string]string{"UPSTREAM": "ftp://example.com"},
 			wantErr:        true,
 			wantErrContain: "scheme must be http or https",
 		},
@@ -70,16 +58,13 @@ func TestLoad_UpstreamParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("UPSTREAM", tt.upstream)
-			os.Unsetenv("PORT")
-
-			cfg, err := Load()
+			cfg, err := Load(func(k string) string { return tt.env[k] })
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("expected error, got nil")
 					return
 				}
-				if tt.wantErrContain != "" && !containsString(err.Error(), tt.wantErrContain) {
+				if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
 					t.Errorf("expected error containing %q, got %q", tt.wantErrContain, err.Error())
 				}
 				return
@@ -100,13 +85,10 @@ func TestLoad_UpstreamParsing(t *testing.T) {
 
 // TestLoad_DefaultValues tests default values
 func TestLoad_DefaultValues(t *testing.T) {
-	envVars := saveEnvVars()
-	defer restoreEnvVars(envVars)
-
-	os.Setenv("UPSTREAM", "http://localhost:8080")
-	clearOptionalEnv()
-
-	cfg, err := Load()
+	cfg, err := Load(func(k string) string {
+		env := map[string]string{"UPSTREAM": "http://localhost:8080"}
+		return env[k]
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,37 +160,6 @@ func TestMatchesEndpoints(t *testing.T) {
 }
 
 // Helper functions
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func saveEnvVars() map[string]string {
-	keys := []string{"UPSTREAM", "PORT", "UPSTREAM_TIMEOUT", "DELAY_MIN", "DELAY_MAX", "MAX_WAIT", "ESCALATE_DELAY_AFTER", "ESCALATE_DELAY_MAX_COUNT", "ENDPOINTS"}
-	vars := make(map[string]string)
-	for _, k := range keys {
-		vars[k] = os.Getenv(k)
-	}
-	return vars
-}
-
-func restoreEnvVars(vars map[string]string) {
-	for k, v := range vars {
-		os.Setenv(k, v)
-	}
-}
-
-func clearOptionalEnv() {
-	keys := []string{"PORT", "UPSTREAM_TIMEOUT", "DELAY_MIN", "DELAY_MAX", "MAX_WAIT", "ESCALATE_DELAY_AFTER", "ESCALATE_DELAY_MAX_COUNT", "ENDPOINTS"}
-	for _, k := range keys {
-		os.Unsetenv(k)
-	}
+func envLookup(env map[string]string) func(string) string {
+	return func(k string) string { return env[k] }
 }

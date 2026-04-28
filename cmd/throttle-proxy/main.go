@@ -21,7 +21,7 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
-	cfg, err := config.Load()
+	cfg, err := config.Load(nil)
 	if err != nil {
 		slog.Error("config error", "err", err)
 		os.Exit(1)
@@ -48,10 +48,11 @@ func main() {
 	handler := proxy.NewHandler(cfg, disp)
 
 	srv := &http.Server{
-		Addr:        fmt.Sprintf(":%d", cfg.Port),
-		Handler:     handler,
-		ReadTimeout: 30 * time.Second,
-		IdleTimeout: 120 * time.Second,
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 		// WriteTimeout: 0 allows streaming and large responses; queue wait is separately controlled by MAX_WAIT.
 	}
 

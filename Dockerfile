@@ -1,7 +1,6 @@
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 WORKDIR /src
-COPY go.mod .
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w" -o /throttle-proxy ./cmd/throttle-proxy

@@ -393,7 +393,9 @@ func TestFireRequest_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -482,7 +484,9 @@ func TestFireRequest_UpstreamError(t *testing.T) {
 	// Create mock upstream server that returns 500
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("server error"))
+		if _, err := w.Write([]byte("server error")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -607,13 +611,17 @@ func TestResult_ContentLength(t *testing.T) {
 	upChunked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upChunked.Close()
 
 	upPlain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upPlain.Close()
 

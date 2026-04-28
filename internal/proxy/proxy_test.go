@@ -68,7 +68,9 @@ func TestServeHTTP_ThrottledPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"result":"success"}`))
+		if _, err := w.Write([]byte(`{"result":"success"}`)); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -110,7 +112,9 @@ func TestServeHTTP_PassthroughPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Upstream-Header", "value")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("upstream response"))
+		if _, err := w.Write([]byte("upstream response")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -152,7 +156,9 @@ func TestServeHTTP_PassthroughRoundRobin(t *testing.T) {
 		requestCounts[0]++
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("upstream1"))
+		if _, err := w.Write([]byte("upstream1")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream1.Close()
 
@@ -161,7 +167,9 @@ func TestServeHTTP_PassthroughRoundRobin(t *testing.T) {
 		requestCounts[1]++
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("upstream2"))
+		if _, err := w.Write([]byte("upstream2")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream2.Close()
 
@@ -213,10 +221,12 @@ func TestServeHTTP_StatusCodes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.body))
-			}))
-			defer upstream.Close()
+			w.WriteHeader(tt.statusCode)
+			if _, err := w.Write([]byte(tt.body)); err != nil {
+				t.Errorf("failed to write response: %v", err)
+			}
+		}))
+		defer upstream.Close()
 
 			upstreamURL, _ := url.Parse(upstream.URL)
 			cfg := &config.Config{
@@ -248,7 +258,9 @@ func TestServeHTTP_StatusCodes(t *testing.T) {
 func TestServeHTTP_ConcurrentAccess(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 

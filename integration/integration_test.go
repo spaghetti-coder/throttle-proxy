@@ -33,7 +33,9 @@ func TestSequentialProcessing(t *testing.T) {
 		requestCount.Add(1)
 		time.Sleep(50 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -41,9 +43,10 @@ func TestSequentialProcessing(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams:       []*url.URL{upstreamURL},
 		UpstreamTimeout: 5 * time.Second,
-		DelayMin:        0,
-		DelayMax:        0,
+		DelayMin:        1 * time.Millisecond,
+		DelayMax:        5 * time.Millisecond,
 		Endpoints:       []string{"/"},
+		QueueSize:       10000,
 	}
 
 	disp := dispatcher.New(cfg)
@@ -84,7 +87,9 @@ func TestFailoverBehavior(t *testing.T) {
 	// Second upstream succeeds
 	upstream2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success from upstream2"))
+		if _, err := w.Write([]byte("success from upstream2")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream2.Close()
 
@@ -126,7 +131,9 @@ func TestFailoverBehavior(t *testing.T) {
 func TestEndpointMatching(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -220,12 +227,14 @@ func TestConcurrentSafe(t *testing.T) {
 
 	for i := range upstreams {
 		upstreams[i] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
-		}))
-		defer upstreams[i].Close()
-		upstreamURLs[i], _ = url.Parse(upstreams[i].URL)
-	}
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("OK")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
+	}))
+	defer upstreams[i].Close()
+	upstreamURLs[i], _ = url.Parse(upstreams[i].URL)
+}
 
 	cfg := &config.Config{
 		Upstreams:       upstreamURLs,

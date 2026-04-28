@@ -69,15 +69,10 @@ func New(cfg *config.Config) *Dispatcher {
 		},
 	}
 
-	queueSize := cfg.QueueSize
-	if queueSize < 1 {
-		queueSize = 1
-	}
-
 	return &Dispatcher{
 		cfg:    cfg,
 		states: states,
-		queue:  make(chan *proxyRequest, queueSize),
+		queue:  make(chan *proxyRequest, cfg.QueueSize),
 		client: client,
 		rng:    rand.New(rand.NewSource(time.Now().UnixNano())),
 	}

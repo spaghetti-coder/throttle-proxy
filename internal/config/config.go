@@ -22,17 +22,21 @@ type Config struct {
 	QueueSize        int
 }
 
-func Load() (*Config, error) {
+func Load(lookup func(string) string) (*Config, error) {
+	if lookup == nil {
+		lookup = os.Getenv
+	}
+
 	cfg := &Config{}
 
 	var err error
 
-	cfg.Port, err = envInt("PORT", 8080)
+	cfg.Port, err = envInt("PORT", 8080, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	upstreamRaw := strings.TrimSpace(os.Getenv("UPSTREAM"))
+	upstreamRaw := strings.TrimSpace(lookup("UPSTREAM"))
 	if upstreamRaw == "" {
 		return nil, fmt.Errorf("UPSTREAM is required")
 	}
@@ -54,17 +58,17 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("UPSTREAM is required")
 	}
 
-	cfg.UpstreamTimeout, err = envSeconds("UPSTREAM_TIMEOUT", 5)
+	cfg.UpstreamTimeout, err = envSeconds("UPSTREAM_TIMEOUT", 5, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.DelayMin, err = envSeconds("DELAY_MIN", 0)
+	cfg.DelayMin, err = envSeconds("DELAY_MIN", 0, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.DelayMax, err = envSeconds("DELAY_MAX", 0)
+	cfg.DelayMax, err = envSeconds("DELAY_MAX", 0, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -73,22 +77,22 @@ func Load() (*Config, error) {
 		cfg.DelayMax = cfg.DelayMin
 	}
 
-	cfg.MaxWait, err = envSeconds("MAX_WAIT", 0)
+	cfg.MaxWait, err = envSeconds("MAX_WAIT", 0, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.EscalateAfter, err = envInt("ESCALATE_DELAY_AFTER", 0)
+	cfg.EscalateAfter, err = envInt("ESCALATE_DELAY_AFTER", 0, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.EscalateMaxCount, err = envInt("ESCALATE_DELAY_MAX_COUNT", 3)
+	cfg.EscalateMaxCount, err = envInt("ESCALATE_DELAY_MAX_COUNT", 3, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	endpoints := strings.TrimSpace(os.Getenv("ENDPOINTS"))
+	endpoints := strings.TrimSpace(lookup("ENDPOINTS"))
 	if endpoints == "" {
 		cfg.Endpoints = []string{"/"}
 	} else {
@@ -102,7 +106,7 @@ func Load() (*Config, error) {
 		}
 	}
 
-	cfg.QueueSize, err = envInt("QUEUE_SIZE", 10000)
+	cfg.QueueSize, err = envInt("QUEUE_SIZE", 10000, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -130,8 +134,8 @@ func MatchesEndpoints(path string, endpoints []string) bool {
 	return false
 }
 
-func envInt(name string, defaultVal int) (int, error) {
-	s := strings.TrimSpace(os.Getenv(name))
+func envInt(name string, defaultVal int, lookup func(string) string) (int, error) {
+	s := strings.TrimSpace(lookup(name))
 	if s == "" {
 		return defaultVal, nil
 	}
@@ -142,8 +146,8 @@ func envInt(name string, defaultVal int) (int, error) {
 	return v, nil
 }
 
-func envSeconds(name string, defaultVal float64) (time.Duration, error) {
-	s := strings.TrimSpace(os.Getenv(name))
+func envSeconds(name string, defaultVal float64, lookup func(string) string) (time.Duration, error) {
+	s := strings.TrimSpace(lookup(name))
 	if s == "" {
 		return time.Duration(defaultVal * float64(time.Second)), nil
 	}
