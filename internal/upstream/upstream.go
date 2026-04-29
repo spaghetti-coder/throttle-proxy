@@ -51,6 +51,7 @@ func NewState(u *url.URL, cfg *config.Config) *State {
 		escalateMaxCount:  cfg.EscalateMaxCount,
 		escalateFactorMin: factorMin,
 		escalateFactorMax: factorMax,
+		window:            []requestMeta{{ts: time.Unix(0, 0), escalationLevel: 0}},
 	}
 }
 
@@ -83,7 +84,7 @@ func (s *State) checkEscalation(rng *rand.Rand) {
 
 	slog.Info("Escalation check", "span", span.Milliseconds(), "threshold", threshold.Milliseconds())
 	if span > threshold {
-		slog.Info("De-escalating", "escalationCount", s.escalationCount)
+		slog.Info("De-escalating", "escalation", s.escalationCount)
 		s.delayMin = s.baseDelayMin
 		s.delayMax = s.baseDelayMax
 		s.escalationCount = 0
@@ -100,12 +101,11 @@ func (s *State) checkEscalation(rng *rand.Rand) {
 		return
 	}
 
-	slog.Info("Escalating", "escalationCount", s.escalationCount)
-	oldMin := s.delayMin
 	factor := s.escalateFactorMin + rng.Float64()*(s.escalateFactorMax-s.escalateFactorMin)
-	s.delayMin = time.Duration(float64(oldMin) * factor)
-	s.delayMax = s.delayMax + s.delayMin - oldMin
+	s.delayMin = time.Duration(float64(s.delayMin) * factor)
+	s.delayMax = time.Duration(float64(s.delayMax) * factor)
 	s.escalationCount++
+	slog.Info("Escalated", "escalation", s.escalationCount, "delayMin", s.delayMin.Milliseconds(), "delayMax", s.delayMax.Milliseconds())
 }
 
 func randDuration(rng *rand.Rand, min, max time.Duration) time.Duration {

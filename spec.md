@@ -60,13 +60,12 @@ Escalation is triggered when the following conditions are met:
 When triggered, delays are escalated:
 
 ```
-DELAY_MIN = DELAY_MIN * rand(ESCALATE_FACTOR)
-DELAY_MAX = DELAY_MAX + DELAY_MIN - OLD_DELAY_MIN
+factor = rand(ESCALATE_FACTOR)
+DELAY_MIN = DELAY_MIN * factor
+DELAY_MAX = DELAY_MAX * factor
 ```
 
 `ESCALATE_FACTOR` is configurable via environment variable, supporting constant (`ESCALATE_FACTOR=1.5`) or range (`ESCALATE_FACTOR=1.5:2.0`) syntax. Default: `1.5:2.0`.
-
-The jitter window (`DELAY_MAX - DELAY_MIN`) is preserved across escalations.
 
 `ESCALATE_MAX_COUNT` caps the number of escalation steps (default: 3, 0 = unlimited).
 

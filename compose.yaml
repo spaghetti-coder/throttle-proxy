@@ -10,14 +10,14 @@ services:
     environment:
       # Multiple upstreams are supported (at least 1 required)
       # - UPSTREAM=http://upstream1,https://upstream2,...
-      - UPSTREAM=http://upstream
+      - UPSTREAM=http://upstream1
       # Port to listen on. Default: 8080
       # - PORT=8088
       # Max time in seconds a request can wait. Default: 0 = disabled.
       # - MAX_WAIT=30
 
-      # ~~ Throttle configuration ~~
-      #    Conservative settings
+      # ~~~ Throttle configuration ~~~
+      # Conservative settings for SearxNG
 
       # Upstream fetch timeout in seconds. Default: 5.
       - UPSTREAM_TIMEOUT=7
@@ -29,17 +29,18 @@ services:
 
       # Gradually increase delays under sustained high-frequency requests. Default 0 = disabled.
       # After escalation:
-      #   DELAY_MIN = DELAY_MIN * ESCALATE_FACTOR
-      #   DELAY_MAX = DELAY_MAX + DELAY_MIN - OLD_DELAY_MIN
-      - ESCALATE_AFTER=3
+      #   factor = rend(ESCALATE_FACTOR)
+      #   DELAY_MIN = DELAY_MIN * factor
+      #   DELAY_MAX = DELAY_MAX * factor
+      - ESCALATE_AFTER=2
 
       # Delay multiplier on each escalation step. Default: 1.5:2.0 -> factor = rand(1.5, 2.0).
       # Supports constant or range: ESCALATE_FACTOR=1.5 or ESCALATE_FACTOR=1.5:2.0 (i.e. min:max).
-      - ESCALATE_FACTOR=2.0:3.0
+      - ESCALATE_FACTOR=1.5
 
       # Max number of delay escalation steps. Default: 3, 0 = unlimited.
       # NOTE: don't go too high!
-      - ESCALATE_MAX_COUNT=6
+      - ESCALATE_MAX_COUNT=5
 
       # Endpoints to throttle, prefix-matched. Default: '/' = all.
       # - ENDPOINTS=/foo,/bar/baz
@@ -54,7 +55,8 @@ services:
   #     - ESCALATE_AFTER=3
   #     - ESCALATE_FACTOR=2
   #     - ESCALATE_MAX_COUNT=4
-  # upstream: { image: nginx:alpine }
+  # upstream1: { image: nginx:alpine }
+  # upstream2: { image: nginx:alpine }
 
 # for i in {0..40}; do
 #   [ $i -eq 5 ] && (set -x; sleep 6)
