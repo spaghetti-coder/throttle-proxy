@@ -25,11 +25,11 @@ func TestNewState_Initialization(t *testing.T) {
 	if state.URL.String() != u.String() {
 		t.Errorf("expected URL %q, got %q", u.String(), state.URL.String())
 	}
-	if state.currentDelayMin != cfg.DelayMin {
-		t.Errorf("expected currentDelayMin %v, got %v", cfg.DelayMin, state.currentDelayMin)
+	if state.delayMin != cfg.DelayMin {
+		t.Errorf("expected delayMin %v, got %v", cfg.DelayMin, state.delayMin)
 	}
-	if state.currentDelayMax != cfg.DelayMax {
-		t.Errorf("expected currentDelayMax %v, got %v", cfg.DelayMax, state.currentDelayMax)
+	if state.delayMax != cfg.DelayMax {
+		t.Errorf("expected delayMax %v, got %v", cfg.DelayMax, state.delayMax)
 	}
 	if state.baseDelayMin != cfg.DelayMin {
 		t.Errorf("expected baseDelayMin %v, got %v", cfg.DelayMin, state.baseDelayMin)
@@ -115,8 +115,8 @@ func TestUpdateAfterRequest_EscalationTrigger(t *testing.T) {
 	if state.escalationCount != 1 {
 		t.Errorf("expected escalationCount 1 after trigger, got %d", state.escalationCount)
 	}
-	if state.currentDelayMin <= cfg.DelayMin {
-		t.Errorf("expected currentDelayMin to increase, got %v", state.currentDelayMin)
+	if state.delayMin <= cfg.DelayMin {
+		t.Errorf("expected delayMin to increase, got %v", state.delayMin)
 	}
 }
 
@@ -140,8 +140,8 @@ func TestUpdateAfterRequest_EscalationDisabled(t *testing.T) {
 	if state.escalationCount != 0 {
 		t.Errorf("expected escalationCount 0 when disabled, got %d", state.escalationCount)
 	}
-	if state.currentDelayMin != cfg.DelayMin {
-		t.Errorf("expected currentDelayMin unchanged, got %v", state.currentDelayMin)
+	if state.delayMin != cfg.DelayMin {
+		t.Errorf("expected delayMin unchanged, got %v", state.delayMin)
 	}
 }
 
@@ -191,14 +191,14 @@ func TestUpdateAfterRequest_Reset(t *testing.T) {
 	}
 
 	// Now send slow request to trigger reset
-	// Need span > threshold = currentDelayMax * escalateAfter
-	// After escalation, currentDelayMax will be higher than base
+	// Need span > threshold = delayMax * escalateAfter
+	// After escalation, delayMax will be higher than base
 	// Use a time far enough in the future to exceed threshold
 	slowTime := now.Add(5 * time.Second)
 	state.UpdateAfterRequest(slowTime, rng)
 
-	if state.currentDelayMin != cfg.DelayMin {
-		t.Errorf("expected reset to baseDelayMin %v, got %v", cfg.DelayMin, state.currentDelayMin)
+	if state.delayMin != cfg.DelayMin {
+		t.Errorf("expected reset to baseDelayMin %v, got %v", cfg.DelayMin, state.delayMin)
 	}
 	if state.escalationCount != 0 {
 		t.Errorf("expected escalationCount reset to 0, got %d", state.escalationCount)

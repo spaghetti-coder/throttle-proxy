@@ -11,39 +11,40 @@ services:
       # Multiple upstreams are supported (at least 1 required)
       # - UPSTREAM=http://upstream1,https://upstream2,...
       - UPSTREAM=http://upstream
-      # Port to listen on (default: 8080)
+      # Port to listen on. Default: 8080
       # - PORT=8088
-      # Max time in seconds a request can wait (default: 0 = disabled).
+      # Max time in seconds a request can wait. Default: 0 = disabled.
       # - MAX_WAIT=30
 
       # ~~ Throttle configuration ~~
       #    Conservative settings
 
-      # Upstream fetch timeout in seconds (default: 5)
+      # Upstream fetch timeout in seconds. Default: 5.
       - UPSTREAM_TIMEOUT=7
 
-      # Delay between requests in seconds (default: 0 = no delay).
-      # Supports constant or range: DELAY=5 or DELAY=0.5:2
+      # Delay between requests in seconds. Default: 0 = no delay.
+      # Supports constant DELAY=5 or range DELAY=5.4:9.7 -> delay = rand(5.4, 9.7).
+      # max < min -> max = min.
       - DELAY=5:9
 
-      # Gradually increase delays under sustained high-frequency requests (default 0 = disabled).
+      # Gradually increase delays under sustained high-frequency requests. Default 0 = disabled.
       # After escalation:
       #   DELAY_MIN = DELAY_MIN * ESCALATE_FACTOR
       #   DELAY_MAX = DELAY_MAX + DELAY_MIN - OLD_DELAY_MIN
       - ESCALATE_AFTER=3
 
-      # Delay multiplier on each escalation step (default 1.5:2.0).
-      # Supports constant or range: ESCALATE_FACTOR=1.5 or ESCALATE_FACTOR=1.5:2.0
-      # - ESCALATE_FACTOR=1.5:2.0
+      # Delay multiplier on each escalation step. Default: 1.5:2.0 -> factor = rand(1.5, 2.0).
+      # Supports constant or range: ESCALATE_FACTOR=1.5 or ESCALATE_FACTOR=1.5:2.0 (i.e. min:max).
+      - ESCALATE_FACTOR=2.0:3.0
 
-      # Max number of delay escalation steps (default: 3, 0 = unlimited).
+      # Max number of delay escalation steps. Default: 3, 0 = unlimited.
       # NOTE: don't go too high!
       - ESCALATE_MAX_COUNT=6
 
-      # Endpoints to throttle, prefix-matched (default: '/' = all).
+      # Endpoints to throttle, prefix-matched. Default: '/' = all.
       # - ENDPOINTS=/foo,/bar/baz
 
-      # Maximum queue size (default: 10000, min: 100, 0 = default)
+      # Maximum queue size. Default: 10000, min: 100, 0 = default.
       # - QUEUE_SIZE=100
 
 
@@ -51,7 +52,7 @@ services:
 # ~~~ Sanity test ~~~
   #     - DELAY=0.1
   #     - ESCALATE_AFTER=3
-  #     - ESCALATE_FACTOR=2.0
+  #     - ESCALATE_FACTOR=2
   #     - ESCALATE_MAX_COUNT=4
   # upstream: { image: nginx:alpine }
 

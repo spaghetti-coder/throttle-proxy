@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"log/slog"
 	"math/rand"
 	"net/url"
 	"sync"
@@ -10,8 +11,8 @@ import (
 )
 
 type requestMeta struct {
-	ts    time.Time
-	count int
+	ts              time.Time
+	escalationLevel int
 }
 
 type State struct {
@@ -19,15 +20,15 @@ type State struct {
 
 	mu              sync.Mutex
 	nextMinTs       time.Time
-	currentDelayMin time.Duration
-	currentDelayMax time.Duration
+	delayMin        time.Duration
+	delayMax        time.Duration
 	escalationCount int
 	window          []requestMeta
 
-	baseDelayMin     time.Duration
-	baseDelayMax     time.Duration
-	escalateAfter    int
-	escalateMaxCount int
+	baseDelayMin      time.Duration
+	baseDelayMax      time.Duration
+	escalateAfter     int
+	escalateMaxCount  int
 	escalateFactorMin float64
 	escalateFactorMax float64
 }
@@ -42,8 +43,8 @@ func NewState(u *url.URL, cfg *config.Config) *State {
 	return &State{
 		URL:               u,
 		nextMinTs:         time.Now(),
-		currentDelayMin:   cfg.DelayMin,
-		currentDelayMax:   cfg.DelayMax,
+		delayMin:          cfg.DelayMin,
+		delayMax:          cfg.DelayMax,
 		baseDelayMin:      cfg.DelayMin,
 		baseDelayMax:      cfg.DelayMax,
 		escalateAfter:     cfg.EscalateAfter,
@@ -64,14 +65,12 @@ func (s *State) UpdateAfterRequest(now time.Time, rng *rand.Rand) {
 	defer s.mu.Unlock()
 
 	if s.escalateAfter > 0 {
-		s.window = append(s.window, requestMeta{ts: now, count: s.escalationCount})
-		if len(s.window) > s.escalateAfter {
-			s.window = s.window[1:]
-		}
+		s.window = append(s.window, requestMeta{ts: now, escalationLevel: s.escalationCount})
+		s.window = s.window[max(0, len(s.window)-s.escalateAfter):]
 		s.checkEscalation(rng)
 	}
 
-	s.nextMinTs = now.Add(randDuration(rng, s.currentDelayMin, s.currentDelayMax))
+	s.nextMinTs = now.Add(randDuration(rng, s.delayMin, s.delayMax))
 }
 
 func (s *State) checkEscalation(rng *rand.Rand) {
@@ -80,19 +79,20 @@ func (s *State) checkEscalation(rng *rand.Rand) {
 	}
 
 	span := s.window[len(s.window)-1].ts.Sub(s.window[0].ts)
-	threshold := time.Duration(int64(s.currentDelayMax) * int64(s.escalateAfter))
+	threshold := time.Duration(int64(s.delayMax) * int64(s.escalateAfter))
 
+	slog.Info("Escalation check", "span", span.Milliseconds(), "threshold", threshold.Milliseconds())
 	if span > threshold {
-		// De-escalation - reset to base delays
-		s.currentDelayMin = s.baseDelayMin
-		s.currentDelayMax = s.baseDelayMax
+		slog.Info("De-escalating", "escalationCount", s.escalationCount)
+		s.delayMin = s.baseDelayMin
+		s.delayMax = s.baseDelayMax
 		s.escalationCount = 0
 		s.window = nil
 		return
 	}
 
 	// Only escalate if the oldest request in the window has the same escalation count
-	if s.window[0].count != s.escalationCount {
+	if s.window[0].escalationLevel != s.escalationCount {
 		return
 	}
 
@@ -100,11 +100,11 @@ func (s *State) checkEscalation(rng *rand.Rand) {
 		return
 	}
 
-	// Escalation
-	oldMin := s.currentDelayMin
+	slog.Info("Escalating", "escalationCount", s.escalationCount)
+	oldMin := s.delayMin
 	factor := s.escalateFactorMin + rng.Float64()*(s.escalateFactorMax-s.escalateFactorMin)
-	s.currentDelayMin = time.Duration(float64(oldMin) * factor)
-	s.currentDelayMax = s.currentDelayMax + s.currentDelayMin - oldMin
+	s.delayMin = time.Duration(float64(oldMin) * factor)
+	s.delayMax = s.delayMax + s.delayMin - oldMin
 	s.escalationCount++
 }
 
