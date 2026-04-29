@@ -1,3 +1,4 @@
+// Package config provides configuration loading for throttle-proxy.
 package config
 
 import (
@@ -9,6 +10,7 @@ import (
 	"time"
 )
 
+// Config holds all configuration for throttle-proxy.
 type Config struct {
 	Port              int
 	Upstreams         []*url.URL
@@ -24,6 +26,7 @@ type Config struct {
 	QueueSize         int
 }
 
+// Load parses configuration from environment variables.
 func Load(lookup func(string) string) (*Config, error) {
 	if lookup == nil {
 		lookup = os.Getenv
@@ -160,7 +163,7 @@ func envSeconds(name string, defaultVal float64, lookup func(string) string) (ti
 	return time.Duration(v * float64(time.Second)), nil
 }
 
-func envSecondsRange(name string, defaultMin, defaultMax float64, lookup func(string) string) (min, max time.Duration, err error) {
+func envSecondsRange(name string, defaultMin, defaultMax float64, lookup func(string) string) (minVal, maxVal time.Duration, err error) {
 	s := strings.TrimSpace(lookup(name))
 	if s == "" {
 		return time.Duration(defaultMin * float64(time.Second)), time.Duration(defaultMax * float64(time.Second)), nil
@@ -192,7 +195,7 @@ func envSecondsRange(name string, defaultMin, defaultMax float64, lookup func(st
 	return time.Duration(fmin * float64(time.Second)), time.Duration(fmax * float64(time.Second)), nil
 }
 
-func envFloatRange(name string, defaultMin, defaultMax float64, lookup func(string) string) (min, max float64, err error) {
+func envFloatRange(name string, defaultMin, defaultMax float64, lookup func(string) string) (minVal, maxVal float64, err error) {
 	s := strings.TrimSpace(lookup(name))
 	if s == "" {
 		return defaultMin, defaultMax, nil
@@ -201,19 +204,19 @@ func envFloatRange(name string, defaultMin, defaultMax float64, lookup func(stri
 	if len(parts) > 2 {
 		return 0, 0, fmt.Errorf("%s must have at most one colon", name)
 	}
-	min, err = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	minVal, err = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s must be a number: %w", name, err)
 	}
-	max = min
+	maxVal = minVal
 	if len(parts) > 1 {
-		max, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		maxVal, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
 		if err != nil {
 			return 0, 0, fmt.Errorf("%s max must be a number: %w", name, err)
 		}
 	}
-	if max < min {
-		max = min
+	if maxVal < minVal {
+		maxVal = minVal
 	}
-	return min, max, nil
+	return minVal, maxVal, nil
 }

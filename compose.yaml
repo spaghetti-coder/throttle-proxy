@@ -17,7 +17,7 @@ services:
       # - MAX_WAIT=30
 
       # ~~~ Throttle configuration ~~~
-      # Conservative settings for SearxNG
+      # Conservative settings for SearxNG, ends up with ~ 40 - 70 secs range
 
       # Upstream fetch timeout in seconds. Default: 5.
       - UPSTREAM_TIMEOUT=7

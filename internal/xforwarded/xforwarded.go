@@ -1,3 +1,4 @@
+// Package xforwarded handles X-Forwarded-* header management.
 package xforwarded
 
 import "net/http"

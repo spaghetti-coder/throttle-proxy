@@ -1,3 +1,4 @@
+// Package main implements the throttle-proxy command-line tool.
 package main
 
 import (
@@ -57,7 +58,6 @@ func main() {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	go disp.Run(ctx)
 
@@ -70,24 +70,33 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	var exitCode int
 	select {
 	case sig := <-sigChan:
 		slog.Info("shutting down", "signal", sig.String())
 	case err := <-serverErr:
 		if !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
-			os.Exit(1)
+			exitCode = 1
 		}
 	}
 
 	cancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "err", err)
+		if exitCode == 0 {
+			exitCode = 1
+		}
 	}
 
+	shutdownCancel()
+
 	slog.Info("stopped")
+
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
 }

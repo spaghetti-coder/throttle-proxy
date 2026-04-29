@@ -298,14 +298,14 @@ func TestRandDuration_EdgeCases(t *testing.T) {
 // TestRandDuration_Range tests randDuration returns value in range
 func TestRandDuration_Range(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
-	min := 1 * time.Second
-	max := 2 * time.Second
+	minVal := 1 * time.Second
+	maxVal := 2 * time.Second
 
 	// Test multiple times to verify range
 	for i := 0; i < 100; i++ {
-		got := randDuration(rng, min, max)
-		if got < min || got >= max {
-			t.Errorf("randDuration() = %v, want value in [%v, %v)", got, min, max)
+		got := randDuration(rng, minVal, maxVal)
+		if got < minVal || got >= maxVal {
+			t.Errorf("randDuration() = %v, want value in [%v, %v)", got, minVal, maxVal)
 		}
 	}
 }

@@ -1,3 +1,4 @@
+// Package dispatcher handles request queuing and dispatching to upstream servers.
 package dispatcher
 
 import (
@@ -56,6 +57,7 @@ type Dispatcher struct {
 	running atomic.Bool
 }
 
+// New creates a new Dispatcher with the given configuration.
 func New(cfg *config.Config) *Dispatcher {
 	states := make([]*upstream.State, len(cfg.Upstreams))
 	for i, u := range cfg.Upstreams {
@@ -85,7 +87,7 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 	if r.Body != nil {
 		var err error
 		bodyBytes, err = io.ReadAll(r.Body)
-		r.Body.Close()
+		_ = r.Body.Close()
 		if err != nil {
 			ch := make(chan Result, 1)
 			ch <- Result{StatusCode: http.StatusBadRequest, Err: err}
@@ -214,9 +216,9 @@ func (d *Dispatcher) fireRequest(ctx context.Context, pr *proxyRequest, state *u
 	if err != nil {
 		return Result{}, err
 	}
-	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
 	if err != nil {
 		return Result{}, err
 	}

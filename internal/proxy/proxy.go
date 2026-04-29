@@ -1,3 +1,4 @@
+// Package proxy provides HTTP proxy functionality for throttle-proxy.
 package proxy
 
 import (
@@ -19,6 +20,7 @@ type Handler struct {
 	rrCounter    atomic.Int64
 }
 
+// NewHandler creates a new HTTP handler with the given configuration and dispatcher.
 func NewHandler(cfg *config.Config, disp *dispatcher.Dispatcher) *Handler {
 	passthroughs := make([]*httputil.ReverseProxy, len(cfg.Upstreams))
 	for i, u := range cfg.Upstreams {

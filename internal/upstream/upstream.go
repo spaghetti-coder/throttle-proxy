@@ -1,3 +1,4 @@
+// Package upstream manages upstream server state and escalation.
 package upstream
 
 import (
@@ -15,6 +16,7 @@ type requestMeta struct {
 	escalationLevel int
 }
 
+// State tracks request timing and escalation for an upstream server.
 type State struct {
 	URL *url.URL
 
@@ -33,6 +35,7 @@ type State struct {
 	escalateFactorMax float64
 }
 
+// NewState creates a new State for the given upstream URL and configuration.
 func NewState(u *url.URL, cfg *config.Config) *State {
 	factorMin := cfg.EscalateFactorMin
 	factorMax := cfg.EscalateFactorMax
@@ -55,12 +58,14 @@ func NewState(u *url.URL, cfg *config.Config) *State {
 	}
 }
 
+// NextMinTs returns the earliest time the next request can be sent.
 func (s *State) NextMinTs() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.nextMinTs
 }
 
+// UpdateAfterRequest updates the state after a request is completed.
 func (s *State) UpdateAfterRequest(now time.Time, rng *rand.Rand) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,9 +113,9 @@ func (s *State) checkEscalation(rng *rand.Rand) {
 	slog.Info("Escalated", "escalation", s.escalationCount, "delayMin", s.delayMin.Milliseconds(), "delayMax", s.delayMax.Milliseconds())
 }
 
-func randDuration(rng *rand.Rand, min, max time.Duration) time.Duration {
-	if max <= min {
-		return min
+func randDuration(rng *rand.Rand, minVal, maxVal time.Duration) time.Duration {
+	if maxVal <= minVal {
+		return minVal
 	}
-	return min + time.Duration(rng.Int63n(int64(max-min)))
+	return minVal + time.Duration(rng.Int63n(int64(maxVal-minVal)))
 }
