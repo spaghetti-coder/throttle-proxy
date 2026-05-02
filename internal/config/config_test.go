@@ -251,6 +251,18 @@ func TestLoad_EscalateFactor(t *testing.T) {
 			wantErr:    true,
 			wantErrStr: "ESCALATE_FACTOR must be a number",
 		},
+		{
+			name:       "negative factor",
+			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "-1.5"},
+			wantErr:    true,
+			wantErrStr: "ESCALATE_FACTOR must not be negative",
+		},
+		{
+			name:       "negative factor max",
+			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:-2"},
+			wantErr:    true,
+			wantErrStr: "ESCALATE_FACTOR max must not be negative",
+		},
 	}
 
 	for _, tt := range tests {

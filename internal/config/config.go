@@ -208,11 +208,17 @@ func envFloatRange(name string, defaultMin, defaultMax float64, lookup func(stri
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s must be a number: %w", name, err)
 	}
+	if minVal < 0 {
+		return 0, 0, fmt.Errorf("%s must not be negative", name)
+	}
 	maxVal = minVal
 	if len(parts) > 1 {
 		maxVal, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
 		if err != nil {
 			return 0, 0, fmt.Errorf("%s max must be a number: %w", name, err)
+		}
+		if maxVal < 0 {
+			return 0, 0, fmt.Errorf("%s max must not be negative", name)
 		}
 	}
 	if maxVal < minVal {
