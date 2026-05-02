@@ -19,6 +19,15 @@ import (
 	"throttle-proxy/internal/xforwarded"
 )
 
+// hopByHopHeaders lists headers that must be removed when proxying requests,
+// as per RFC 2616 Section 13.5.1. These headers are hop-by-hop headers and
+// should not be forwarded between clients and origins across proxies.
+//
+// Categories of hop-by-hop headers:
+//   - Connection management: Connection, Keep-Alive, Proxy-Connection
+//   - Proxy authentication: Proxy-Authenticate, Proxy-Authorization
+//   - Protocol upgrades: Upgrade, TE
+//   - Transfer encoding: Transfer-Encoding, Trailer (note: Trailers header, not Trailer)
 var hopByHopHeaders = []string{
 	"Connection",
 	"Keep-Alive",
@@ -30,6 +39,25 @@ var hopByHopHeaders = []string{
 	"Transfer-Encoding",
 	"Upgrade",
 }
+
+// HTTP status codes used by the dispatcher.
+// Using named constants improves readability and maintainability.
+const (
+	// statusQueueFull is returned when the request queue is at capacity.
+	statusQueueFull = http.StatusServiceUnavailable
+
+	// statusShuttingDown is returned when the dispatcher is stopping
+	// and cannot accept new requests.
+	statusShuttingDown = http.StatusServiceUnavailable
+
+	// statusMaxWaitExceeded is returned when a request has been waiting
+	// in the queue longer than its configured max wait time.
+	statusMaxWaitExceeded = http.StatusServiceUnavailable
+
+	// statusAllUpstreamsFailed is returned when all upstream servers
+	// fail to respond or return 5xx errors.
+	statusAllUpstreamsFailed = http.StatusBadGateway
+)
 
 // Result holds the proxied response to be forwarded to the client.
 type Result struct {
@@ -103,13 +131,13 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 		maxWait:    d.cfg.MaxWait,
 	}
 	if !d.running.Load() {
-		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("dispatcher stopped")}
+		pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: fmt.Errorf("dispatcher stopped")}
 		return pr.resultChan
 	}
 	select {
 	case d.queue <- pr:
 	default:
-		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("queue full")}
+		pr.resultChan <- Result{StatusCode: statusQueueFull, Err: fmt.Errorf("queue full")}
 	}
 	return pr.resultChan
 }
@@ -127,7 +155,7 @@ func (d *Dispatcher) Run(ctx context.Context) {
 			for {
 				select {
 				case pr := <-d.queue:
-					pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("dispatcher shutting down")}
+					pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: fmt.Errorf("dispatcher shutting down")}
 				default:
 					return
 				}
@@ -138,19 +166,33 @@ func (d *Dispatcher) Run(ctx context.Context) {
 	}
 }
 
+// dispatch implements Earliest Deadline First (EDF) scheduling for request dispatch.
+//
+// Algorithm overview:
+//  1. For each upstream, get the next available timestamp (deadline)
+//  2. Sort upstreams by deadline (earliest first)
+//  3. Try each upstream in order: wait until available, then send request
+//  4. If the request succeeds (status < 500), return the response
+//  5. If all upstreams fail, return 502 Bad Gateway
+//
+// This ensures fair scheduling across all upstreams while respecting rate limits.
 func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 	select {
 	case <-ctx.Done():
-		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("dispatcher shutting down")}
+		pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: fmt.Errorf("dispatcher shutting down")}
 		return
 	default:
 	}
 
+	// Check if request has exceeded its maximum wait time in the queue.
+	// If maxWait is configured and exceeded, fail fast with 503.
 	if pr.maxWait > 0 && time.Since(pr.enqueuedAt) >= pr.maxWait {
-		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("max wait exceeded")}
+		pr.resultChan <- Result{StatusCode: statusMaxWaitExceeded, Err: fmt.Errorf("max wait exceeded")}
 		return
 	}
 
+	// Build list of upstream candidates with their next available timestamps.
+	// The EDF algorithm selects the upstream with the earliest deadline.
 	type candidate struct {
 		state *upstream.State
 		ts    time.Time
@@ -159,36 +201,46 @@ func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 	for i, s := range d.states {
 		candidates[i] = candidate{s, s.NextMinTs()}
 	}
+	// Sort by deadline (earliest first) - this is the core EDF scheduling decision.
 	sort.Slice(candidates, func(a, b int) bool {
 		return candidates[a].ts.Before(candidates[b].ts)
 	})
 
+	// Try each upstream in EDF order, waiting as needed and failing over on errors.
 	now := time.Now()
 	for _, c := range candidates {
+		// Wait until this upstream becomes available (respects rate limiting).
+		// This timer enforces the delay between requests to avoid rate limits.
 		if c.ts.After(now) {
 			timer := time.NewTimer(c.ts.Sub(now))
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: ctx.Err()}
+				pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: ctx.Err()}
 				return
 			case <-timer.C:
 			}
 			timer.Stop()
 		}
 
+		// Send request to this upstream and update its timing state.
 		res, err := d.fireRequest(ctx, pr, c.state)
 		c.state.UpdateAfterRequest(time.Now(), d.rng)
 
+		// Success: status < 500 means the upstream handled the request.
+		// Return the result to complete dispatch for this request.
 		if err == nil && res.StatusCode < 500 {
 			pr.resultChan <- res
 			return
 		}
 
+		// Failure: move to next candidate. Update time for subsequent wait calculations.
 		now = time.Now()
 	}
 
-	pr.resultChan <- Result{StatusCode: http.StatusBadGateway, Err: fmt.Errorf("all upstreams failed")}
+	// All upstreams failed - return 502 Bad Gateway as per HTTP specification.
+	// This indicates the proxy cannot get a valid response from upstream.
+	pr.resultChan <- Result{StatusCode: statusAllUpstreamsFailed, Err: fmt.Errorf("all upstreams failed")}
 }
 
 func (d *Dispatcher) fireRequest(ctx context.Context, pr *proxyRequest, state *upstream.State) (Result, error) {

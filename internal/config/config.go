@@ -10,6 +10,31 @@ import (
 	"time"
 )
 
+const (
+	// DefaultPort is the default HTTP port for the proxy.
+	DefaultPort = 8080
+	// DefaultUpstreamTimeout is the default timeout for upstream requests in seconds.
+	DefaultUpstreamTimeout = 5
+	// DefaultDelayMin is the default minimum delay in seconds.
+	DefaultDelayMin = 0
+	// DefaultDelayMax is the default maximum delay in seconds.
+	DefaultDelayMax = 0
+	// DefaultMaxWait is the default maximum wait time for queue in seconds.
+	DefaultMaxWait = 0
+	// DefaultEscalateAfter is the default number of failures before escalation.
+	DefaultEscalateAfter = 0
+	// DefaultEscalateMaxCount is the default maximum escalation attempts.
+	DefaultEscalateMaxCount = 3
+	// DefaultEscalateFactorMin is the default minimum escalation factor.
+	DefaultEscalateFactorMin = 1.5
+	// DefaultEscalateFactorMax is the default maximum escalation factor.
+	DefaultEscalateFactorMax = 2.0
+	// DefaultQueueSize is the default request queue size.
+	DefaultQueueSize = 10000
+	// MinQueueSize is the minimum allowed queue size.
+	MinQueueSize = 100
+)
+
 // Config holds all configuration for throttle-proxy.
 type Config struct {
 	Port              int
@@ -36,7 +61,7 @@ func Load(lookup func(string) string) (*Config, error) {
 
 	var err error
 
-	cfg.Port, err = envInt("PORT", 8080, lookup)
+	cfg.Port, err = envInt("PORT", DefaultPort, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -63,12 +88,12 @@ func Load(lookup func(string) string) (*Config, error) {
 		return nil, fmt.Errorf("UPSTREAM is required")
 	}
 
-	cfg.UpstreamTimeout, err = envSeconds("UPSTREAM_TIMEOUT", 5, lookup)
+	cfg.UpstreamTimeout, err = envSeconds("UPSTREAM_TIMEOUT", DefaultUpstreamTimeout, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.DelayMin, cfg.DelayMax, err = envSecondsRange("DELAY", 0, 0, lookup)
+	cfg.DelayMin, cfg.DelayMax, err = envSecondsRange("DELAY", DefaultDelayMin, DefaultDelayMax, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -77,22 +102,22 @@ func Load(lookup func(string) string) (*Config, error) {
 		cfg.DelayMax = cfg.DelayMin
 	}
 
-	cfg.MaxWait, err = envSeconds("MAX_WAIT", 0, lookup)
+	cfg.MaxWait, err = envSeconds("MAX_WAIT", DefaultMaxWait, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.EscalateAfter, err = envInt("ESCALATE_AFTER", 0, lookup)
+	cfg.EscalateAfter, err = envInt("ESCALATE_AFTER", DefaultEscalateAfter, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.EscalateMaxCount, err = envInt("ESCALATE_MAX_COUNT", 3, lookup)
+	cfg.EscalateMaxCount, err = envInt("ESCALATE_MAX_COUNT", DefaultEscalateMaxCount, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.EscalateFactorMin, cfg.EscalateFactorMax, err = envFloatRange("ESCALATE_FACTOR", 1.5, 2.0, lookup)
+	cfg.EscalateFactorMin, cfg.EscalateFactorMax, err = envFloatRange("ESCALATE_FACTOR", DefaultEscalateFactorMin, DefaultEscalateFactorMax, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -111,15 +136,15 @@ func Load(lookup func(string) string) (*Config, error) {
 		}
 	}
 
-	cfg.QueueSize, err = envInt("QUEUE_SIZE", 10000, lookup)
+	cfg.QueueSize, err = envInt("QUEUE_SIZE", DefaultQueueSize, lookup)
 	if err != nil {
 		return nil, err
 	}
 	if cfg.QueueSize <= 0 {
-		cfg.QueueSize = 10000
+		cfg.QueueSize = DefaultQueueSize
 	}
-	if cfg.QueueSize < 100 {
-		cfg.QueueSize = 100
+	if cfg.QueueSize < MinQueueSize {
+		cfg.QueueSize = MinQueueSize
 	}
 
 	return cfg, nil

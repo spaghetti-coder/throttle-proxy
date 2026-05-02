@@ -94,26 +94,26 @@ func TestLoad_DefaultValues(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.Port != 8080 {
-		t.Errorf("expected default Port 8080, got %d", cfg.Port)
+	if cfg.Port != DefaultPort {
+		t.Errorf("expected default Port %d, got %d", DefaultPort, cfg.Port)
 	}
-	if cfg.UpstreamTimeout != 5*time.Second {
-		t.Errorf("expected default UpstreamTimeout 5s, got %v", cfg.UpstreamTimeout)
+	if cfg.UpstreamTimeout != DefaultUpstreamTimeout*time.Second {
+		t.Errorf("expected default UpstreamTimeout %ds, got %v", DefaultUpstreamTimeout, cfg.UpstreamTimeout)
 	}
 	if cfg.DelayMin != 0 {
-		t.Errorf("expected default DelayMin 0, got %v", cfg.DelayMin)
+		t.Errorf("expected default DelayMin %d, got %v", DefaultDelayMin, cfg.DelayMin)
 	}
 	if cfg.DelayMax != 0 {
-		t.Errorf("expected default DelayMax 0, got %v", cfg.DelayMax)
+		t.Errorf("expected default DelayMax %d, got %v", DefaultDelayMax, cfg.DelayMax)
 	}
-	if cfg.EscalateMaxCount != 3 {
-		t.Errorf("expected default EscalateMaxCount 3, got %d", cfg.EscalateMaxCount)
+	if cfg.EscalateMaxCount != DefaultEscalateMaxCount {
+		t.Errorf("expected default EscalateMaxCount %d, got %d", DefaultEscalateMaxCount, cfg.EscalateMaxCount)
 	}
-	if cfg.EscalateFactorMin != 1.5 {
-		t.Errorf("expected default EscalateFactorMin 1.5, got %f", cfg.EscalateFactorMin)
+	if cfg.EscalateFactorMin != DefaultEscalateFactorMin {
+		t.Errorf("expected default EscalateFactorMin %f, got %f", DefaultEscalateFactorMin, cfg.EscalateFactorMin)
 	}
-	if cfg.EscalateFactorMax != 2.0 {
-		t.Errorf("expected default EscalateFactorMax 2.0, got %f", cfg.EscalateFactorMax)
+	if cfg.EscalateFactorMax != DefaultEscalateFactorMax {
+		t.Errorf("expected default EscalateFactorMax %f, got %f", DefaultEscalateFactorMax, cfg.EscalateFactorMax)
 	}
 	if len(cfg.Endpoints) != 1 || cfg.Endpoints[0] != "/" {
 		t.Errorf("expected default Endpoints [\"/\"], got %v", cfg.Endpoints)
