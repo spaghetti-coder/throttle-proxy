@@ -46,7 +46,7 @@ docker compose up -d
 | `UPSTREAM_TIMEOUT` | `5` | Upstream fetch timeout (seconds) |
 | `DELAY` | `0` | Delay between requests (seconds). Supports `min:max` range: `DELAY=0.5:2`. If max < min, max = min |
 | `MAX_WAIT` | `0` | Max time a request can wait in queue — returns 503 if exceeded (`0` = unlimited) |
-| `ESCALATE_AFTER` | `0` | Under sustained high-frequency load, trigger delay escalation after this many requests (`0` = disabled) |
+| `ESCALATE_AFTER` | `0` | Trigger delay escalation after this many requests. Must be `0` (disabled) or `>= 2` |
 | `ESCALATE_MAX_COUNT` | `3` | Maximum delay escalation steps (`0` = unlimited) |
 | `ESCALATE_FACTOR` | `1.5:2.0` | Delay multiplier on each escalation step. Supports constant (`1.5`) or range (`1.5:2.0`) |
 | `ENDPOINTS` | `/` | Comma-separated endpoint prefixes to throttle. Prefix-matched: `/search` matches `/search` and `/search/foo`, but not `/searches` |

@@ -111,6 +111,9 @@ func Load(lookup func(string) string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.EscalateAfter > 0 && cfg.EscalateAfter < 2 {
+		return nil, fmt.Errorf("ESCALATE_AFTER must be greater than 1 (or 0 to disable)")
+	}
 
 	cfg.EscalateMaxCount, err = envInt("ESCALATE_MAX_COUNT", DefaultEscalateMaxCount, lookup)
 	if err != nil {

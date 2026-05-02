@@ -404,6 +404,22 @@ func TestLoad_EdgeCases(t *testing.T) {
 			wantErrContain: "ESCALATE_AFTER must be an integer",
 		},
 		{
+			name:           "escalate after value 1 too low",
+			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "1"},
+			wantErr:        true,
+			wantErrContain: "ESCALATE_AFTER must be greater than 1",
+		},
+		{
+			name:           "escalate after value 2 valid",
+			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "2"},
+			wantErr:        false,
+		},
+		{
+			name:           "escalate after value 0 disabled valid",
+			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "0"},
+			wantErr:        false,
+		},
+		{
 			name:           "invalid escalate max count",
 			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_MAX_COUNT": "xyz"},
 			wantErr:        true,

@@ -85,7 +85,7 @@ func TestEscalationIncreasesDelayProperty(t *testing.T) {
 			DelayMax:          time.Duration(initialDelay) * 2,
 			EscalateFactorMin: factorMin,
 			EscalateFactorMax: factorMax,
-			EscalateAfter:     1, // Disable escalation checking for this property
+			EscalateAfter:     0, // Disable escalation checking for this property
 		}
 		state := NewState(u, cfg)
 		
