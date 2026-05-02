@@ -227,14 +227,14 @@ func TestConcurrentSafe(t *testing.T) {
 
 	for i := range upstreams {
 		upstreams[i] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte("OK")); err != nil {
-			t.Errorf("failed to write response: %v", err)
-		}
-	}))
-	defer upstreams[i].Close()
-	upstreamURLs[i], _ = url.Parse(upstreams[i].URL)
-}
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write([]byte("OK")); err != nil {
+				t.Errorf("failed to write response: %v", err)
+			}
+		}))
+		defer upstreams[i].Close()
+		upstreamURLs[i], _ = url.Parse(upstreams[i].URL)
+	}
 
 	cfg := &config.Config{
 		Upstreams:       upstreamURLs,
