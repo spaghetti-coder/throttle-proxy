@@ -290,6 +290,318 @@ func TestLoad_EscalateFactor(t *testing.T) {
 	}
 }
 
+// TestEnvSeconds_Empty tests envSeconds returns default when env var is empty
+func TestEnvSeconds_Empty(t *testing.T) {
+	lookup := envLookup(map[string]string{"TEST_TIMEOUT": ""})
+	duration, err := envSeconds("TEST_TIMEOUT", 5.0, lookup)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	expected := 5 * time.Second
+	if duration != expected {
+		t.Errorf("expected duration %v, got %v", expected, duration)
+	}
+}
+
+// TestEnvSeconds_Valid tests envSeconds parses valid duration
+func TestEnvSeconds_Valid(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected time.Duration
+	}{
+		{
+			name:     "integer seconds",
+			value:    "10",
+			expected: 10 * time.Second,
+		},
+		{
+			name:     "float seconds",
+			value:    "0.5",
+			expected: 500 * time.Millisecond,
+		},
+		{
+			name:     "large value",
+			value:    "3600",
+			expected: 3600 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookup := envLookup(map[string]string{"TEST_TIMEOUT": tt.value})
+			duration, err := envSeconds("TEST_TIMEOUT", 5.0, lookup)
+			if err != nil {
+				t.Errorf("expected no error, got %v", err)
+			}
+			if duration != tt.expected {
+				t.Errorf("expected duration %v, got %v", tt.expected, duration)
+			}
+		})
+	}
+}
+
+// TestEnvSeconds_Invalid tests envSeconds returns error for invalid values
+func TestEnvSeconds_Invalid(t *testing.T) {
+	lookup := envLookup(map[string]string{"TEST_TIMEOUT": "invalid"})
+	_, err := envSeconds("TEST_TIMEOUT", 5.0, lookup)
+	if err == nil {
+		t.Error("expected error for invalid value, got nil")
+	}
+	if !strings.Contains(err.Error(), "TEST_TIMEOUT must be a number") {
+		t.Errorf("expected error containing 'TEST_TIMEOUT must be a number', got %v", err)
+	}
+}
+
+// TestEnvSeconds_Zero tests envSeconds handles zero
+func TestEnvSeconds_Zero(t *testing.T) {
+	lookup := envLookup(map[string]string{"TEST_TIMEOUT": "0"})
+	duration, err := envSeconds("TEST_TIMEOUT", 5.0, lookup)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if duration != 0 {
+		t.Errorf("expected duration 0, got %v", duration)
+	}
+}
+
+// TestLoad_EdgeCases tests edge cases and error paths
+func TestLoad_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name           string
+		env            map[string]string
+		wantErr        bool
+		wantErrContain string
+	}{
+		{
+			name:           "malformed URL",
+			env:            map[string]string{"UPSTREAM": "://invalid-url"},
+			wantErr:        true,
+			wantErrContain: "invalid UPSTREAM",
+		},
+		{
+			name:           "empty upstreams (only whitespace)",
+			env:            map[string]string{"UPSTREAM": "  ,  ,  "},
+			wantErr:        true,
+			wantErrContain: "UPSTREAM is required",
+		},
+		{
+			name:           "invalid upstream timeout",
+			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "UPSTREAM_TIMEOUT": "abc"},
+			wantErr:        true,
+			wantErrContain: "UPSTREAM_TIMEOUT must be a number",
+		},
+		{
+			name:           "invalid port",
+			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "PORT": "not-a-number"},
+			wantErr:        true,
+			wantErrContain: "PORT must be an integer",
+		},
+		{
+			name:           "invalid escalate after",
+			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "xyz"},
+			wantErr:        true,
+			wantErrContain: "ESCALATE_AFTER must be an integer",
+		},
+		{
+			name:           "invalid escalate max count",
+			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_MAX_COUNT": "xyz"},
+			wantErr:        true,
+			wantErrContain: "ESCALATE_MAX_COUNT must be an integer",
+		},
+		{
+			name:           "invalid queue size",
+			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "QUEUE_SIZE": "abc"},
+			wantErr:        true,
+			wantErrContain: "QUEUE_SIZE must be an integer",
+		},
+		{
+			name:           "whitespace around values",
+			env:            map[string]string{"UPSTREAM": "  http://localhost:8080  ", "PORT": "  9000  "},
+			wantErr:        false,
+			wantErrContain: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Load(envLookup(tt.env))
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+					return
+				}
+				if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
+					t.Errorf("expected error containing %q, got %q", tt.wantErrContain, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if cfg != nil && tt.name == "whitespace around values" {
+				if cfg.Port != 9000 {
+					t.Errorf("expected Port 9000, got %d", cfg.Port)
+				}
+			}
+		})
+	}
+}
+
+// TestLoad_MaxWait tests MAX_WAIT edge cases
+func TestLoad_MaxWait(t *testing.T) {
+	tests := []struct {
+		name       string
+		maxWait    string
+		wantErr    bool
+		wantErrStr string
+	}{
+		{
+			name:    "valid max wait",
+			maxWait: "30",
+			wantErr: false,
+		},
+		{
+			name:       "invalid max wait",
+			maxWait:    "invalid",
+			wantErr:    true,
+			wantErrStr: "MAX_WAIT must be a number",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := map[string]string{
+				"UPSTREAM": "http://localhost:8080",
+				"MAX_WAIT": tt.maxWait,
+			}
+			cfg, err := Load(envLookup(env))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.wantErrStr) {
+					t.Errorf("expected error containing %q, got %v", tt.wantErrStr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			_ = cfg
+		})
+	}
+}
+
+// TestLoad_EndpointsEdgeCases tests edge cases in endpoint parsing
+func TestLoad_EndpointsEdgeCases(t *testing.T) {
+	tests := []struct {
+		name         string
+		endpoints    string
+		wantEndpoints []string
+	}{
+		{
+			name:         "empty endpoints defaults to root",
+			endpoints:    "",
+			wantEndpoints: []string{"/"},
+		},
+		{
+			name:         "whitespace only endpoints defaults to root",
+			endpoints:    "   ",
+			wantEndpoints: []string{"/"},
+		},
+		{
+			name:         "single endpoint without slash",
+			endpoints:    "api",
+			wantEndpoints: []string{"api"},
+		},
+		{
+			name:         "endpoint with trailing slash",
+			endpoints:    "/api/",
+			wantEndpoints: []string{"/api"},
+		},
+		{
+			name:         "multiple endpoints",
+			endpoints:    "/api, /search",
+			wantEndpoints: []string{"/api", "/search"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := map[string]string{
+				"UPSTREAM":  "http://localhost:8080",
+				"ENDPOINTS": tt.endpoints,
+			}
+			cfg, err := Load(envLookup(env))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(cfg.Endpoints) != len(tt.wantEndpoints) {
+				t.Errorf("expected %d endpoints, got %d: %v", len(tt.wantEndpoints), len(cfg.Endpoints), cfg.Endpoints)
+				return
+			}
+			for i, want := range tt.wantEndpoints {
+				if cfg.Endpoints[i] != want {
+					t.Errorf("expected endpoint[%d] = %q, got %q", i, want, cfg.Endpoints[i])
+				}
+			}
+		})
+	}
+}
+
+// TestLoad_QueueSizeEdgeCases tests queue size edge cases
+func TestLoad_QueueSizeEdgeCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		queueSize string
+		wantSize  int
+	}{
+		{
+			name:      "valid queue size",
+			queueSize: "5000",
+			wantSize:  5000,
+		},
+		{
+			name:      "zero queue size uses default",
+			queueSize: "0",
+			wantSize:  DefaultQueueSize,
+		},
+		{
+			name:      "negative queue size uses default",
+			queueSize: "-100",
+			wantSize:  DefaultQueueSize,
+		},
+		{
+			name:      "below minimum queue size",
+			queueSize: "50",
+			wantSize:  MinQueueSize,
+		},
+		{
+			name:      "minimum queue size",
+			queueSize: "100",
+			wantSize:  100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := map[string]string{
+				"UPSTREAM":   "http://localhost:8080",
+				"QUEUE_SIZE": tt.queueSize,
+			}
+			cfg, err := Load(envLookup(env))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.QueueSize != tt.wantSize {
+				t.Errorf("expected QueueSize %d, got %d", tt.wantSize, cfg.QueueSize)
+			}
+		})
+	}
+}
+
 // TestMatchesEndpoints tests endpoint prefix matching
 func TestMatchesEndpoints(t *testing.T) {
 	tests := []struct {

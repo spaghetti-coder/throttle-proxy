@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -47,22 +48,38 @@ const (
 // Graceful shutdown timeout for active connections.
 const shutdownTimeout = 30 * time.Second
 
-func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
+// run contains the main application logic and returns an exit code.
+// This function is separate from main() to enable testing.
+func run(
+	getenv func(string) string,
+	sigChan <-chan os.Signal,
+	listener net.Listener,
+	logger *slog.Logger,
+) int {
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+	}
 
-	cfg, err := config.Load(nil)
+	var lookup func(string) string
+	if getenv != nil {
+		lookup = getenv
+	} else {
+		lookup = os.Getenv
+	}
+
+	cfg, err := config.Load(lookup)
 	if err != nil {
-		slog.Error("config error", "err", err)
-		os.Exit(1)
+		logger.Error("config error", "err", err)
+		return 1
 	}
 
 	upstreamURLs := make([]string, len(cfg.Upstreams))
 	for i, u := range cfg.Upstreams {
 		upstreamURLs[i] = u.String()
 	}
-	slog.Info("starting throttle-proxy",
+	logger.Info("starting throttle-proxy",
 		"port", cfg.Port,
 		"upstreams", upstreamURLs,
 		"upstream_timeout", cfg.UpstreamTimeout,
@@ -93,20 +110,22 @@ func main() {
 
 	serverErr := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		serverErr <- srv.ListenAndServe()
+		if listener != nil {
+			logger.Info("listening", "addr", listener.Addr().String())
+			serverErr <- srv.Serve(listener)
+		} else {
+			logger.Info("listening", "addr", srv.Addr)
+			serverErr <- srv.ListenAndServe()
+		}
 	}()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	var exitCode int
 	select {
 	case sig := <-sigChan:
-		slog.Info("shutting down", "signal", sig.String())
+		logger.Info("shutting down", "signal", sig.String())
 	case err := <-serverErr:
 		if !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("server error", "err", err)
+			logger.Error("server error", "err", err)
 			exitCode = 1
 		}
 	}
@@ -114,18 +133,29 @@ func main() {
 	cancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("shutdown error", "err", err)
+		logger.Error("shutdown error", "err", err)
 		if exitCode == 0 {
 			exitCode = 1
 		}
 	}
 
-	shutdownCancel()
+	logger.Info("stopped")
 
-	slog.Info("stopped")
+	return exitCode
+}
 
+func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	exitCode := run(nil, sigChan, nil, nil)
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
