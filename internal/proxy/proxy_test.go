@@ -221,12 +221,12 @@ func TestServeHTTP_StatusCodes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(tt.statusCode)
-			if _, err := w.Write([]byte(tt.body)); err != nil {
-				t.Errorf("failed to write response: %v", err)
-			}
-		}))
-		defer upstream.Close()
+				w.WriteHeader(tt.statusCode)
+				if _, err := w.Write([]byte(tt.body)); err != nil {
+					t.Errorf("failed to write response: %v", err)
+				}
+			}))
+			defer upstream.Close()
 
 			upstreamURL, _ := url.Parse(upstream.URL)
 			cfg := &config.Config{

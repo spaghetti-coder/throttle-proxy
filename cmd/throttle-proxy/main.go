@@ -1,4 +1,21 @@
 // Package main implements the throttle-proxy command-line tool.
+//
+// Program Flow:
+//  1. Load configuration from environment variables
+//  2. Create request dispatcher and HTTP handler
+//  3. Start HTTP server with timeouts and signal handling
+//  4. Handle graceful shutdown on SIGINT/SIGTERM signals
+//
+// The proxy serializes incoming requests to prevent upstream rate limiting
+// and IP bans. It implements a queue-based dispatch system where concurrent
+// requests to the same upstream endpoint are queued and processed sequentially.
+//
+// Graceful shutdown:
+//   - Stop accepting new connections
+//   - Wait for active requests to complete (up to 30s timeout)
+//   - Exit cleanly or with error code on failure
+//
+// Environment variables: See internal/config/config.go for full list.
 package main
 
 import (
@@ -16,6 +33,19 @@ import (
 	"throttle-proxy/internal/dispatcher"
 	"throttle-proxy/internal/proxy"
 )
+
+// Server timeout constants for http.Server configuration.
+const (
+	// Time allowed to read request headers (prevents slowloris attacks)
+	defaultReadHeaderTimeout = 10 * time.Second
+	// Time allowed to read the entire request including body
+	defaultReadTimeout = 30 * time.Second
+	// Time between requests on a keep-alive connection
+	defaultIdleTimeout = 120 * time.Second
+)
+
+// Graceful shutdown timeout for active connections.
+const shutdownTimeout = 30 * time.Second
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -51,9 +81,9 @@ func main() {
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
 		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: defaultReadHeaderTimeout,
+		ReadTimeout:       defaultReadTimeout,
+		IdleTimeout:       defaultIdleTimeout,
 		// WriteTimeout: 0 allows streaming and large responses; queue wait is separately controlled by MAX_WAIT.
 	}
 
@@ -83,7 +113,7 @@ func main() {
 
 	cancel()
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "err", err)
