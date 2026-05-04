@@ -4,6 +4,21 @@ A lightweight Go reverse proxy that protects upstream services from request floo
 
 It sits between clients and upstream servers, ensuring that at most one request is in-flight at any given time per upstream. Requests are queued and dispatched using Earliest Deadline First (EDF) scheduling with configurable, randomized delays. Under sustained high-frequency load, delays automatically escalate to avoid triggering upstream rate limits.
 
+## Table of Contents
+
+- [When to use](#when-to-use)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+  - [Environment variables](#environment-variables)
+  - [MCP tool timeouts for AI agents](#mcp-tool-timeouts-for-ai-agents)
+  - [Example: SearxNG with conservative delays](#example-searxng-with-conservative-delays)
+- [How it works](#how-it-works)
+- [Installation](#installation)
+  - [Docker](#docker)
+  - [Go](#go)
+- [Testing](#testing)
+
 ## When to use
 
 - **AI agent integrations**: Your agent can issue dozens parallel `curl` requests to a meta-search engine (e.g., [SearxNG](https://docs.searxng.org/)). The backend proxies them to Google, Bing, DuckDuckGo, which detect simultaneous requests and ban your IP. `throttle-proxy` serializes these requests, adds human-like jitter between them, and gradually backs off if the load pattern persists.
@@ -51,6 +66,16 @@ docker compose up -d
 | `ESCALATE_FACTOR` | `1.5:2.0` | Delay multiplier on each escalation step. Supports constant (`1.5`) or range (`1.5:2.0`) |
 | `ENDPOINTS` | `/` | Comma-separated endpoint prefixes to throttle. Prefix-matched: `/search` matches `/search` and `/search/foo`, but not `/searches` |
 | `QUEUE_SIZE` | `100` | Max queue size. Minimum: `1`; values below `1` are raised to `1`. Special: `0` = `100` |
+
+### MCP tool timeouts for AI agents
+
+Default MCP tool call timeouts in AI agents (typically 30–120 s) may be too short when the proxy queue backs up. Depending on `QUEUE_SIZE`, `DELAY`, and escalation settings, requests can wait well beyond the agent's default. Increase the timeout in your agent's configuration file to prevent disconnects:
+
+| Agent | Config key | File |
+|-------|------------|------|
+| **OpenCode** | `experimental.mcp_timeout` | `opencode.jsonc` |
+| **Hermes** | `mcp_servers.timeout` | `config.yaml` |
+| **Claude Code** | `env.MCP_TOOL_TIMEOUT` | `.claude.json` |
 
 ### Example: SearxNG with conservative delays
 
