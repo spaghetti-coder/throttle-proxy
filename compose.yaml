@@ -45,7 +45,7 @@ services:
       # Endpoints to throttle, prefix-matched. Default: '/' = all.
       # - ENDPOINTS=/foo,/bar/baz
 
-      # Maximum queue size. Default: 10000, min: 100, 0 = default.
+      # Maximum queue size. Default: 100, min: 1, 0 = default.
       # - QUEUE_SIZE=100
 
 

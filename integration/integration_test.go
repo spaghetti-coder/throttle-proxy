@@ -46,7 +46,7 @@ func TestSequentialProcessing(t *testing.T) {
 		DelayMin:        1 * time.Millisecond,
 		DelayMax:        5 * time.Millisecond,
 		Endpoints:       []string{"/"},
-		QueueSize:       10000,
+		QueueSize:       100,
 	}
 
 	disp := dispatcher.New(cfg)
@@ -242,7 +242,7 @@ func TestConcurrentSafe(t *testing.T) {
 		DelayMin:        1 * time.Millisecond,
 		DelayMax:        5 * time.Millisecond,
 		Endpoints:       []string{"/"},
-		QueueSize:       10000,
+		QueueSize:       100,
 	}
 
 	disp := dispatcher.New(cfg)

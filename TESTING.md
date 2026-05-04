@@ -118,7 +118,7 @@ go test -v ./internal/config/...
 - Valid configuration with all options
 - Missing required upstream URLs
 - Invalid duration formats
-- Edge cases for queue size (minimum 100)
+- Edge cases for queue size (minimum 1)
 
 ### Package: `internal/dispatcher`
 

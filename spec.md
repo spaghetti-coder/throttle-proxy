@@ -19,9 +19,9 @@ docker, docker compose, golang
 ## Requests queue
 
 The requests queue stores requests and ensures their sequential processing with configured randomized delay. The queue size is configurable via the QUEUE_SIZE environment variable:
-- Default: 10000
-- Minimum: 100 (values below 100 are raised to 100)
-- Special case: QUEUE_SIZE=0 is treated as 10000
+- Default: 100
+- Minimum: 1 (values below 1 are raised to 1)
+- Special case: QUEUE_SIZE=0 is treated as 100
 Incoming requests are accepted until the queue reaches its configured limit.
 
 `MAX_WAIT` (optional, seconds, default 0 = disabled) — if a request waits longer than this before firing, return 503 immediately.

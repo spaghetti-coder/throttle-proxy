@@ -590,14 +590,14 @@ func TestLoad_QueueSizeEdgeCases(t *testing.T) {
 			wantSize:  DefaultQueueSize,
 		},
 		{
-			name:      "below minimum queue size",
+			name:      "small positive queue size",
 			queueSize: "50",
-			wantSize:  MinQueueSize,
+			wantSize:  50,
 		},
 		{
 			name:      "minimum queue size",
-			queueSize: "100",
-			wantSize:  100,
+			queueSize: "1",
+			wantSize:  1,
 		},
 	}
 

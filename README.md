@@ -50,7 +50,7 @@ docker compose up -d
 | `ESCALATE_MAX_COUNT` | `3` | Maximum delay escalation steps (`0` = unlimited) |
 | `ESCALATE_FACTOR` | `1.5:2.0` | Delay multiplier on each escalation step. Supports constant (`1.5`) or range (`1.5:2.0`) |
 | `ENDPOINTS` | `/` | Comma-separated endpoint prefixes to throttle. Prefix-matched: `/search` matches `/search` and `/search/foo`, but not `/searches` |
-| `QUEUE_SIZE` | `10000` | Max queue size. Minimum: `100`; values below `100` are raised to `100`. Special: `0` = `10000` |
+| `QUEUE_SIZE` | `100` | Max queue size. Minimum: `1`; values below `1` are raised to `1`. Special: `0` = `100` |
 
 ### Example: SearxNG with conservative delays
 

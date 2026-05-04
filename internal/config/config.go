@@ -30,9 +30,9 @@ const (
 	// DefaultEscalateFactorMax is the default maximum escalation factor.
 	DefaultEscalateFactorMax = 2.0
 	// DefaultQueueSize is the default request queue size.
-	DefaultQueueSize = 10000
+	DefaultQueueSize = 100
 	// MinQueueSize is the minimum allowed queue size.
-	MinQueueSize = 100
+	MinQueueSize = 1
 )
 
 // Config holds all configuration for throttle-proxy.
