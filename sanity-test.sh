@@ -1,5 +1,10 @@
 #!/bin/bash
 
+declare -A DEFAULTS=(
+  [COUNT]=5
+  [URL]="http://localhost:36579"
+)
+
 if [[ "$1" =~ ^(-\?|-h|--help)$ ]]; then
   SCRIPT_NAME="$(basename "$0")"
 
@@ -9,8 +14,8 @@ Usage: $SCRIPT_NAME [COUNT] [URL]
 Run concurrent HEAD requests to a target URL and report response times.
 
 Arguments (positional, order-independent):
-  COUNT  Number of concurrent requests. Default: 5
-  URL    Target URL. Default: http://localhost:7080
+  COUNT  Number of concurrent requests. Default: ${DEFAULTS[COUNT]}
+  URL    Target URL. Default: ${DEFAULTS[URL]}
 
 Examples:
   $SCRIPT_NAME
@@ -32,8 +37,8 @@ for arg in "${@:1:2}"; do
   URL="$arg"
 done
 
-COUNT="${COUNT-5}"
-URL="${URL-http://localhost:7080}"
+COUNT="${COUNT-${DEFAULTS[COUNT]}}"
+URL="${URL-${DEFAULTS[URL]}}"
 
 LOCK="$(mktemp)"
 
