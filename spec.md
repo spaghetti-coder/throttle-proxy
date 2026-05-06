@@ -53,9 +53,9 @@ Each upstream maintains its own escalation state (current `DELAY_MIN`, `DELAY_MA
 The sliding window stores metadata for each request, including its timestamp and the `escalationCount` active at the time of the request.
 
 Escalation is triggered when the following conditions are met:
-1. The window contains at least `ESCALATE_AFTER - 1` requests.
+1. The window contains at least `ESCALATE_AFTER` requests.
 2. The oldest request in the window has the same `escalationCount` as the current state (ensuring escalation happens per generation).
-3. The span between the oldest and the newest request in the window is less than or equal to `DELAY_MAX * ESCALATE_AFTER`.
+3. The span between the oldest and the newest request in the window is at least `DELAY_MIN` (prevents false escalation from sequential dispatch artifacts) and less than or equal to `DELAY_MAX * ESCALATE_AFTER`.
 
 When triggered, delays are escalated:
 

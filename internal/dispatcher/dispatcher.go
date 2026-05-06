@@ -73,6 +73,7 @@ type proxyRequest struct {
 	resultChan chan Result
 	enqueuedAt time.Time
 	maxWait    time.Duration
+	ctx        context.Context
 }
 
 // Dispatcher serializes requests to upstreams using Earliest Deadline First scheduling.
@@ -129,6 +130,11 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 		resultChan: make(chan Result, 1),
 		enqueuedAt: time.Now(),
 		maxWait:    d.cfg.MaxWait,
+		ctx:        r.Context(),
+	}
+	if pr.ctx.Err() != nil {
+		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("client disconnected")}
+		return pr.resultChan
 	}
 	if !d.running.Load() {
 		pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: fmt.Errorf("dispatcher stopped")}
@@ -218,9 +224,18 @@ func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 				timer.Stop()
 				pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: ctx.Err()}
 				return
+			case <-pr.ctx.Done():
+				timer.Stop()
+				pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("client disconnected")}
+				return
 			case <-timer.C:
 			}
 			timer.Stop()
+		}
+
+		if pr.ctx.Err() != nil {
+			pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("client disconnected")}
+			return
 		}
 
 		// Send request to this upstream and update its timing state.

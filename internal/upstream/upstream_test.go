@@ -56,10 +56,8 @@ func TestNewState_Initialization(t *testing.T) {
 	if state.escalationCount != 0 {
 		t.Errorf("expected escalationCount 0, got %d", state.escalationCount)
 	}
-	// window is initialized with one sentinel element (time.Unix(0, 0))
-	// This is an implementation detail for the sliding window algorithm
-	if len(state.window) == 0 {
-		t.Errorf("expected non-empty window (sentinel), got %d items", len(state.window))
+	if len(state.window) != 0 {
+		t.Errorf("expected empty window on init, got %d items", len(state.window))
 	}
 }
 
@@ -98,13 +96,11 @@ func TestUpdateAfterRequest_FirstRequest(t *testing.T) {
 	now := time.Now()
 	state.UpdateAfterRequest(now, rng)
 
-	// After first request with large span (time since Unix epoch), de-escalation happens
-	// and window is cleared. This is correct behavior.
-	// The implementation clears the window when span > threshold (de-escalation path).
-	// So window can be empty after first request if span is large.
-	// Just verify escalationCount is still 0 (no escalation happened)
 	if state.escalationCount != 0 {
 		t.Errorf("expected escalationCount 0 after first request, got %d", state.escalationCount)
+	}
+	if len(state.window) != 1 {
+		t.Errorf("expected window to have 1 entry after first request, got %d", len(state.window))
 	}
 }
 
@@ -120,7 +116,6 @@ func TestUpdateAfterRequest_EscalationTrigger(t *testing.T) {
 	state := NewState(u, cfg)
 	rng := rand.New(rand.NewSource(42))
 
-	// Add requests within threshold time window
 	now := time.Now()
 	state.UpdateAfterRequest(now, rng)
 	state.UpdateAfterRequest(now.Add(50*time.Millisecond), rng)
@@ -325,14 +320,10 @@ func TestUpdateAfterRequest_EscalationSameGeneration(t *testing.T) {
 
 	now := time.Now()
 
-	// First request clears the sentinel (triggers de-escalation due to large span)
+	// Build up window with requests close together to trigger first escalation
 	state.UpdateAfterRequest(now, rng)
-
-	// Need escalateAfter (3) requests to fill window enough for escalation check
-	// Window size check: len(window) >= escalateAfter-1 (2) to proceed with escalation logic
-	state.UpdateAfterRequest(now.Add(10*time.Millisecond), rng)
-	state.UpdateAfterRequest(now.Add(20*time.Millisecond), rng)
-	state.UpdateAfterRequest(now.Add(30*time.Millisecond), rng)
+	state.UpdateAfterRequest(now.Add(50*time.Millisecond), rng)
+	state.UpdateAfterRequest(now.Add(100*time.Millisecond), rng)
 
 	if state.escalationCount != 1 {
 		t.Errorf("expected escalationCount 1 after first trigger, got %d", state.escalationCount)
@@ -343,9 +334,9 @@ func TestUpdateAfterRequest_EscalationSameGeneration(t *testing.T) {
 	// Adding more requests with small span will trigger another escalation
 
 	// Add 3 more requests to trigger second escalation
-	state.UpdateAfterRequest(now.Add(100*time.Millisecond), rng)
-	state.UpdateAfterRequest(now.Add(110*time.Millisecond), rng)
-	state.UpdateAfterRequest(now.Add(120*time.Millisecond), rng)
+	state.UpdateAfterRequest(now.Add(500*time.Millisecond), rng)
+	state.UpdateAfterRequest(now.Add(600*time.Millisecond), rng)
+	state.UpdateAfterRequest(now.Add(700*time.Millisecond), rng)
 
 	if state.escalationCount != 2 {
 		t.Errorf("expected escalationCount 2 after second trigger, got %d", state.escalationCount)

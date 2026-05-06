@@ -113,32 +113,29 @@ func TestEscalationIncreasesDelayProperty(t *testing.T) {
 // the configured maximum count.
 func TestEscalationRespectsMaxCountProperty(t *testing.T) {
 	f := func(maxCount int) bool {
-		// Pre-condition: max count should be non-negative
 		if maxCount < 0 {
 			return true
 		}
 		
 		u, _ := url.Parse("http://example.com")
 		cfg := &config.Config{
-			DelayMin:         10 * time.Millisecond,
-			DelayMax:         20 * time.Millisecond,
+			DelayMin:         1 * time.Millisecond,
+			DelayMax:         2 * time.Millisecond,
 			EscalateAfter:    2,
 			EscalateMaxCount: maxCount,
 		}
 		state := NewState(u, cfg)
 		
-		// Simulate many requests to try to exceed max count
 		rng := rand.New(rand.NewSource(42))
+		baseTime := time.Now()
 		for i := 0; i < 100; i++ {
-			state.UpdateAfterRequest(time.Now().Add(time.Duration(i)*time.Millisecond), rng)
+			state.UpdateAfterRequest(baseTime.Add(time.Duration(i)*2*time.Millisecond), rng)
 		}
 		
-		// If maxCount is 0, escalation is unlimited
 		if maxCount == 0 {
 			return true
 		}
 		
-		// Otherwise, escalation count should never exceed maxCount
 		return state.escalationCount <= maxCount
 	}
 	

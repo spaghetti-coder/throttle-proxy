@@ -102,7 +102,7 @@ func NewState(u *url.URL, cfg *config.Config) *State {
 		escalateMaxCount:  cfg.EscalateMaxCount,
 		escalateFactorMin: factorMin,
 		escalateFactorMax: factorMax,
-		window:            []requestMeta{{ts: time.Unix(0, 0), escalationLevel: 0}},
+		window:            []requestMeta{},
 	}
 }
 
@@ -184,7 +184,7 @@ func (s *State) UpdateAfterRequest(now time.Time, rng *rand.Rand) {
 // 7. Log the escalation for observability.
 func (s *State) checkEscalation(rng *rand.Rand) {
 	// Skip if window doesn't have enough entries for a meaningful check.
-	if len(s.window) < s.escalateAfter-1 {
+	if len(s.window) < s.escalateAfter {
 		return
 	}
 
@@ -194,6 +194,10 @@ func (s *State) checkEscalation(rng *rand.Rand) {
 	threshold := time.Duration(int64(s.delayMax) * int64(s.escalateAfter))
 
 	slog.Info("Escalation check", "span", span.Milliseconds(), "threshold", threshold.Milliseconds())
+
+	if span < s.delayMin {
+		return
+	}
 
 	// De-escalation: Requests are coming slowly enough, reset to base delays.
 	if span > threshold {

@@ -417,6 +417,7 @@ func TestFireRequest_Success(t *testing.T) {
 		resultChan: make(chan Result, 1),
 		enqueuedAt: time.Now(),
 		maxWait:    0,
+		ctx:        context.Background(),
 	}
 
 	// Get state
@@ -468,6 +469,7 @@ func TestFireRequest_WithBody(t *testing.T) {
 		resultChan: make(chan Result, 1),
 		enqueuedAt: time.Now(),
 		maxWait:    0,
+		ctx:        context.Background(),
 	}
 
 	state := d.states[0]
@@ -503,6 +505,7 @@ func TestFireRequest_UpstreamError(t *testing.T) {
 		resultChan: make(chan Result, 1),
 		enqueuedAt: time.Now(),
 		maxWait:    0,
+		ctx:        context.Background(),
 	}
 
 	state := d.states[0]
@@ -534,8 +537,9 @@ func TestDispatch_MaxWaitTimeout(t *testing.T) {
 	pr := &proxyRequest{
 		r:          req,
 		resultChan: make(chan Result, 1),
-		enqueuedAt: time.Now().Add(-3 * time.Second), // Enqueued 3 seconds ago
-		maxWait:    1 * time.Second,                  // But max wait is 1 second
+		enqueuedAt: time.Now().Add(-3 * time.Second),
+		maxWait:    1 * time.Second,
+		ctx:        context.Background(),
 	}
 
 	ctx := context.Background()
@@ -580,6 +584,7 @@ func TestDispatch_ContextCancellation(t *testing.T) {
 		resultChan: make(chan Result, 1),
 		enqueuedAt: time.Now(),
 		maxWait:    0,
+		ctx:        context.Background(),
 	}
 
 	// Create context that we'll cancel
@@ -642,6 +647,7 @@ func TestResult_ContentLength(t *testing.T) {
 			resultChan: make(chan Result, 1),
 			enqueuedAt: time.Now(),
 			maxWait:    0,
+			ctx:        context.Background(),
 		}
 		ctx := context.Background()
 		d.dispatch(ctx, pr)
@@ -665,6 +671,7 @@ func TestResult_ContentLength(t *testing.T) {
 			resultChan: make(chan Result, 1),
 			enqueuedAt: time.Now(),
 			maxWait:    0,
+			ctx:        context.Background(),
 		}
 		ctx := context.Background()
 		d.dispatch(ctx, pr)
@@ -673,4 +680,62 @@ func TestResult_ContentLength(t *testing.T) {
 			t.Errorf("expected Content-Length 2, got %q", cl)
 		}
 	})
+}
+
+func TestDispatch_ClientDisconnectDuringWait(t *testing.T) {
+	blockDone := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-blockDone
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	cfg := &config.Config{
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		DelayMin:        5 * time.Second,
+		DelayMax:        10 * time.Second,
+	}
+	d := New(cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go d.Run(ctx)
+
+	time.Sleep(10 * time.Millisecond)
+
+	firstReq := httptest.NewRequest("GET", "/test", nil)
+	firstResult := d.Enqueue(firstReq)
+
+	time.Sleep(50 * time.Millisecond)
+
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest("GET", "/test", nil)
+	req = req.WithContext(reqCtx)
+
+	resultChan := d.Enqueue(req)
+
+	time.Sleep(50 * time.Millisecond)
+	reqCancel()
+
+	close(blockDone)
+
+	select {
+	case <-firstResult:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first request did not complete")
+	}
+
+	select {
+	case result := <-resultChan:
+		if result.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("expected status 503 for client disconnect, got %d", result.StatusCode)
+		}
+		if result.Err == nil {
+			t.Error("expected error for client disconnect")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch did not complete after client disconnect")
+	}
 }
