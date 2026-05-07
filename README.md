@@ -71,11 +71,13 @@ docker compose up -d
 
 Default MCP tool call timeouts in AI agents (typically 30–120 s) may be too short when the proxy queue backs up. Depending on `QUEUE_SIZE`, `DELAY`, and escalation settings, requests can wait well beyond the agent's default. Increase the timeout in your agent's configuration file to prevent disconnects:
 
-| Agent | Config key | File |
-|-------|------------|------|
-| **OpenCode** | `experimental.mcp_timeout` | `opencode.jsonc` |
-| **Hermes** | `mcp_servers.timeout` | `config.yaml` |
-| **Claude Code** | `env.MCP_TOOL_TIMEOUT` | `.claude.json` |
+| Agent           | Config key                 | Suggested  | File            |
+|-----------------|----------------------------|------------|-----------------|
+| **OpenCode**    | `experimental.mcp_timeout` | 310000     |`opencode.jsonc` |
+| **Hermes**      | `mcp_servers.timeout`      | 310000     | `config.yaml`   |
+| **Claude Code** | `env.MCP_TOOL_TIMEOUT`     | 310000     |`.claude.json`   |
+
+`310000` is not a magic number. Most MCP servers drop connections after 5 minutes (at least mu current in use).
 
 ### Example: SearxNG with conservative delays
 

@@ -17,7 +17,8 @@ services:
       # - MAX_WAIT=30
 
       # ~~~ Throttle configuration ~~~
-      # Conservative settings for SearxNG, ends up with ~ 40 - 70 secs range
+      # Conservative settings for SearxNG, ends up with ~ 40 - 70 secs range,
+      # allows ~ 12 - 13 requests per 5 mins
 
       # Upstream fetch timeout in seconds. Default: 5.
       - UPSTREAM_TIMEOUT=7
@@ -25,22 +26,22 @@ services:
       # Delay between requests in seconds. Default: 0 = no delay.
       # Supports constant DELAY=5 or range DELAY=5.4:9.7 -> delay = rand(5.4, 9.7).
       # max < min -> max = min.
-      - DELAY=5:9
+      - DELAY=7:9
 
       # Gradually increase delays under sustained high-frequency requests. Default 0 = disabled.
       # After escalation:
-      #   factor = rend(ESCALATE_FACTOR)
+      #   factor = rand(ESCALATE_FACTOR)
       #   DELAY_MIN = DELAY_MIN * factor
       #   DELAY_MAX = DELAY_MAX * factor
       - ESCALATE_AFTER=2
 
       # Delay multiplier on each escalation step. Default: 1.5:2.0 -> factor = rand(1.5, 2.0).
       # Supports constant or range: ESCALATE_FACTOR=1.5 or ESCALATE_FACTOR=1.5:2.0 (i.e. min:max).
-      - ESCALATE_FACTOR=1.5
+      - ESCALATE_FACTOR=2
 
       # Max number of delay escalation steps. Default: 3, 0 = unlimited.
       # NOTE: don't go too high!
-      - ESCALATE_MAX_COUNT=5
+      - ESCALATE_MAX_COUNT=2
 
       # Endpoints to throttle, prefix-matched. Default: '/' = all.
       # - ENDPOINTS=/foo,/bar/baz
