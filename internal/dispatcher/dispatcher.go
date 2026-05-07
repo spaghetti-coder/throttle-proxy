@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"sort"
@@ -118,6 +119,7 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 		bodyBytes, err = io.ReadAll(r.Body)
 		_ = r.Body.Close()
 		if err != nil {
+			slog.Warn("read body failed", "method", r.Method, "path", r.URL.Path, "client", r.RemoteAddr, "err", err)
 			ch := make(chan Result, 1)
 			ch <- Result{StatusCode: http.StatusBadRequest, Err: err}
 			return ch
@@ -133,6 +135,7 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 		ctx:        r.Context(),
 	}
 	if pr.ctx.Err() != nil {
+		slog.Warn("client disconnected", "method", r.Method, "path", r.URL.Path, "client", r.RemoteAddr)
 		pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("client disconnected")}
 		return pr.resultChan
 	}
@@ -143,6 +146,7 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 	select {
 	case d.queue <- pr:
 	default:
+		slog.Warn("queue full", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr)
 		pr.resultChan <- Result{StatusCode: statusQueueFull, Err: fmt.Errorf("queue full")}
 	}
 	return pr.resultChan
@@ -161,6 +165,7 @@ func (d *Dispatcher) Run(ctx context.Context) {
 			for {
 				select {
 				case pr := <-d.queue:
+					slog.Warn("dispatcher shutting down, request dropped", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr)
 					pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: fmt.Errorf("dispatcher shutting down")}
 				default:
 					return
@@ -185,6 +190,7 @@ func (d *Dispatcher) Run(ctx context.Context) {
 func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 	select {
 	case <-ctx.Done():
+		slog.Warn("dispatcher shutting down", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr)
 		pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: fmt.Errorf("dispatcher shutting down")}
 		return
 	default:
@@ -193,6 +199,7 @@ func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 	// Check if request has exceeded its maximum wait time in the queue.
 	// If maxWait is configured and exceeded, fail fast with 503.
 	if pr.maxWait > 0 && time.Since(pr.enqueuedAt) >= pr.maxWait {
+		slog.Warn("max wait exceeded", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr, "max_wait", pr.maxWait)
 		pr.resultChan <- Result{StatusCode: statusMaxWaitExceeded, Err: fmt.Errorf("max wait exceeded")}
 		return
 	}
@@ -222,10 +229,12 @@ func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 			select {
 			case <-ctx.Done():
 				timer.Stop()
+				slog.Warn("dispatcher shutting down", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr)
 				pr.resultChan <- Result{StatusCode: statusShuttingDown, Err: ctx.Err()}
 				return
 			case <-pr.ctx.Done():
 				timer.Stop()
+				slog.Warn("client disconnected", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr)
 				pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("client disconnected")}
 				return
 			case <-timer.C:
@@ -234,27 +243,36 @@ func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 		}
 
 		if pr.ctx.Err() != nil {
+			slog.Warn("client disconnected", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr)
 			pr.resultChan <- Result{StatusCode: http.StatusServiceUnavailable, Err: fmt.Errorf("client disconnected")}
 			return
 		}
 
-		// Send request to this upstream and update its timing state.
 		res, err := d.fireRequest(ctx, pr, c.state)
 		c.state.UpdateAfterRequest(time.Now(), d.rng)
 
-		// Success: status < 500 means the upstream handled the request.
-		// Return the result to complete dispatch for this request.
-		if err == nil && res.StatusCode < 500 {
+		if err != nil {
+			slog.Warn("upstream request failed", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr, "upstream", c.state.URL.String(), "err", err)
+			now = time.Now()
+			continue
+		}
+		if res.StatusCode >= 500 {
+			slog.Warn("upstream error", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr, "upstream", c.state.URL.String(), "status", res.StatusCode)
+			now = time.Now()
+			continue
+		}
+		if res.StatusCode == http.StatusTooManyRequests || res.StatusCode == http.StatusForbidden {
+			slog.Warn("upstream rate limited or forbidden", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr, "upstream", c.state.URL.String(), "status", res.StatusCode)
 			pr.resultChan <- res
 			return
 		}
-
-		// Failure: move to next candidate. Update time for subsequent wait calculations.
-		now = time.Now()
+		pr.resultChan <- res
+		return
 	}
 
 	// All upstreams failed - return 502 Bad Gateway as per HTTP specification.
 	// This indicates the proxy cannot get a valid response from upstream.
+	slog.Error("all upstreams failed", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr)
 	pr.resultChan <- Result{StatusCode: statusAllUpstreamsFailed, Err: fmt.Errorf("all upstreams failed")}
 }
 
