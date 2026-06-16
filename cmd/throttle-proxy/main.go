@@ -1,21 +1,4 @@
-// Package main implements the throttle-proxy command-line tool.
-//
-// Program Flow:
-//  1. Load configuration from environment variables
-//  2. Create request dispatcher and HTTP handler
-//  3. Start HTTP server with timeouts and signal handling
-//  4. Handle graceful shutdown on SIGINT/SIGTERM signals
-//
-// The proxy serializes incoming requests to prevent upstream rate limiting
-// and IP bans. It implements a queue-based dispatch system where concurrent
-// requests to the same upstream endpoint are queued and processed sequentially.
-//
-// Graceful shutdown:
-//   - Stop accepting new connections
-//   - Wait for active requests to complete (up to 30s timeout)
-//   - Exit cleanly or with error code on failure
-//
-// Environment variables: See internal/config/config.go for full list.
+// Package main runs the throttle-proxy HTTP server.
 package main
 
 import (
@@ -35,18 +18,12 @@ import (
 	"throttle-proxy/internal/proxy"
 )
 
-// Server timeout constants for http.Server configuration.
 const (
-	// Time allowed to read request headers (prevents slowloris attacks)
 	defaultReadHeaderTimeout = 10 * time.Second
-	// Time allowed to read the entire request including body
-	defaultReadTimeout = 30 * time.Second
-	// Time between requests on a keep-alive connection
-	defaultIdleTimeout = 120 * time.Second
+	defaultReadTimeout       = 30 * time.Second
+	defaultIdleTimeout       = 120 * time.Second
+	shutdownTimeout          = 30 * time.Second
 )
-
-// Graceful shutdown timeout for active connections.
-const shutdownTimeout = 30 * time.Second
 
 // run contains the main application logic and returns an exit code.
 // This function is separate from main() to enable testing.
@@ -101,7 +78,8 @@ func run(
 		ReadHeaderTimeout: defaultReadHeaderTimeout,
 		ReadTimeout:       defaultReadTimeout,
 		IdleTimeout:       defaultIdleTimeout,
-		// WriteTimeout: 0 allows streaming and large responses; queue wait is separately controlled by MAX_WAIT.
+		// WriteTimeout left at zero so streaming responses are not cut off;
+		// request queuing is bounded by MAX_WAIT instead.
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

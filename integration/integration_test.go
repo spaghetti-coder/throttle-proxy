@@ -16,9 +16,7 @@ import (
 	"throttle-proxy/internal/proxy"
 )
 
-// TestSequentialProcessing verifies that requests are processed sequentially
 func TestSequentialProcessing(t *testing.T) {
-	// Create counting upstream
 	var requestCount atomic.Int64
 	var maxConcurrent atomic.Int64
 	var currentConcurrent atomic.Int64
@@ -55,8 +53,6 @@ func TestSequentialProcessing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
-
-	// Wait for dispatcher to start accepting requests
 	time.Sleep(10 * time.Millisecond)
 
 	var wg sync.WaitGroup
@@ -76,15 +72,11 @@ func TestSequentialProcessing(t *testing.T) {
 	}
 }
 
-// TestFailoverBehavior tests failover to next upstream on failure
 func TestFailoverBehavior(t *testing.T) {
-	// First upstream always fails
 	upstream1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer upstream1.Close()
-
-	// Second upstream succeeds
 	upstream2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte("success from upstream2")); err != nil {
@@ -109,8 +101,6 @@ func TestFailoverBehavior(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
-
-	// Wait for dispatcher to start accepting requests
 	time.Sleep(10 * time.Millisecond)
 
 	req := httptest.NewRequest("GET", "/", nil)
@@ -127,7 +117,6 @@ func TestFailoverBehavior(t *testing.T) {
 	}
 }
 
-// TestEndpointMatching tests endpoint prefix matching
 func TestEndpointMatching(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -152,8 +141,6 @@ func TestEndpointMatching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
-
-	// Wait for dispatcher to start accepting requests
 	time.Sleep(10 * time.Millisecond)
 
 	tests := []struct {
@@ -180,7 +167,6 @@ func TestEndpointMatching(t *testing.T) {
 	}
 }
 
-// TestRoundRobinPassthrough tests round-robin for passthrough endpoints
 func TestRoundRobinPassthrough(t *testing.T) {
 	var counts []atomic.Int64
 
@@ -220,7 +206,6 @@ func TestRoundRobinPassthrough(t *testing.T) {
 	}
 }
 
-// TestConcurrentSafe verifies thread safety
 func TestConcurrentSafe(t *testing.T) {
 	upstreams := make([]*httptest.Server, 3)
 	upstreamURLs := make([]*url.URL, 3)
@@ -251,8 +236,6 @@ func TestConcurrentSafe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
-
-	// Wait for dispatcher to start accepting requests
 	time.Sleep(10 * time.Millisecond)
 
 	var wg sync.WaitGroup

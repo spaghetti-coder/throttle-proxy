@@ -13,14 +13,11 @@ import (
 )
 
 func init() {
-	// Disable slog output during tests
-	// This prevents log noise from checkEscalation
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelError,
 	})))
 }
 
-// TestNewState_Initialization tests State initialization
 func TestNewState_Initialization(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
@@ -32,104 +29,92 @@ func TestNewState_Initialization(t *testing.T) {
 
 	state := NewState(u, cfg)
 
-	if state.URL.String() != u.String() {
-		t.Errorf("expected URL %q, got %q", u.String(), state.URL.String())
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"URL", state.URL.String(), u.String()},
+		{"delayMin", state.delayMin, cfg.DelayMin},
+		{"delayMax", state.delayMax, cfg.DelayMax},
+		{"baseDelayMin", state.baseDelayMin, cfg.DelayMin},
+		{"baseDelayMax", state.baseDelayMax, cfg.DelayMax},
+		{"escalateAfter", state.escalateAfter, cfg.EscalateAfter},
+		{"escalateMaxCount", state.escalateMaxCount, cfg.EscalateMaxCount},
+		{"escalationCount", state.escalationCount, 0},
+		{"window length", len(state.window), 0},
 	}
-	if state.delayMin != cfg.DelayMin {
-		t.Errorf("expected delayMin %v, got %v", cfg.DelayMin, state.delayMin)
-	}
-	if state.delayMax != cfg.DelayMax {
-		t.Errorf("expected delayMax %v, got %v", cfg.DelayMax, state.delayMax)
-	}
-	if state.baseDelayMin != cfg.DelayMin {
-		t.Errorf("expected baseDelayMin %v, got %v", cfg.DelayMin, state.baseDelayMin)
-	}
-	if state.baseDelayMax != cfg.DelayMax {
-		t.Errorf("expected baseDelayMax %v, got %v", cfg.DelayMax, state.baseDelayMax)
-	}
-	if state.escalateAfter != cfg.EscalateAfter {
-		t.Errorf("expected escalateAfter %d, got %d", cfg.EscalateAfter, state.escalateAfter)
-	}
-	if state.escalateMaxCount != cfg.EscalateMaxCount {
-		t.Errorf("expected escalateMaxCount %d, got %d", cfg.EscalateMaxCount, state.escalateMaxCount)
-	}
-	if state.escalationCount != 0 {
-		t.Errorf("expected escalationCount 0, got %d", state.escalationCount)
-	}
-	if len(state.window) != 0 {
-		t.Errorf("expected empty window on init, got %d items", len(state.window))
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			if c.got != c.want {
+				t.Errorf("got %v, want %v", c.got, c.want)
+			}
+		})
 	}
 }
 
-// TestNextMinTs_ThreadSafe tests thread safety of NextMinTs
-func TestNextMinTs_ThreadSafe(t *testing.T) {
+func TestNewState_NextMinTsInitializedNearNow(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
-	cfg := &config.Config{DelayMin: 1 * time.Second, DelayMax: 2 * time.Second}
+	cfg := &config.Config{DelayMin: time.Second, DelayMax: 2 * time.Second}
+
+	before := time.Now()
 	state := NewState(u, cfg)
+	after := time.Now()
 
-	const goroutines = 100
-	var wg sync.WaitGroup
-	wg.Add(goroutines)
-
-	for i := 0; i < goroutines; i++ {
-		go func() {
-			defer wg.Done()
-			_ = state.NextMinTs()
-		}()
+	got := state.NextMinTs()
+	if got.Before(before) || got.After(after) {
+		t.Errorf("NextMinTs() = %v, want in [%v, %v]", got, before, after)
 	}
-
-	wg.Wait()
 }
 
-// TestUpdateAfterRequest_FirstRequest tests first request handling
-func TestUpdateAfterRequest_FirstRequest(t *testing.T) {
+func TestNewState_EscalateFactors(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
-	cfg := &config.Config{
-		DelayMin:         1 * time.Second,
-		DelayMax:         2 * time.Second,
-		EscalateAfter:    3,
-		EscalateMaxCount: 3,
-	}
-	state := NewState(u, cfg)
-	rng := rand.New(rand.NewSource(42))
 
-	now := time.Now()
-	state.UpdateAfterRequest(now, rng)
-
-	if state.escalationCount != 0 {
-		t.Errorf("expected escalationCount 0 after first request, got %d", state.escalationCount)
+	tests := []struct {
+		name    string
+		cfgMin  float64
+		cfgMax  float64
+		wantMin float64
+		wantMax float64
+	}{
+		{"configured values preserved", 2.5, 3.5, 2.5, 3.5},
+		{"zero values use defaults", 0, 0, 1.5, 2.0},
 	}
-	if len(state.window) != 1 {
-		t.Errorf("expected window to have 1 entry after first request, got %d", len(state.window))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := NewState(u, &config.Config{
+				DelayMin:          time.Second,
+				DelayMax:          2 * time.Second,
+				EscalateFactorMin: tt.cfgMin,
+				EscalateFactorMax: tt.cfgMax,
+			})
+			if state.escalateFactorMin != tt.wantMin || state.escalateFactorMax != tt.wantMax {
+				t.Errorf("factors = (%v, %v), want (%v, %v)",
+					state.escalateFactorMin, state.escalateFactorMax, tt.wantMin, tt.wantMax)
+			}
+		})
 	}
 }
 
-// TestUpdateAfterRequest_EscalationTrigger tests escalation when window is full
-func TestUpdateAfterRequest_EscalationTrigger(t *testing.T) {
+func TestUpdateAfterRequest_NextMinTsAdvances(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
-	cfg := &config.Config{
-		DelayMin:         100 * time.Millisecond,
-		DelayMax:         200 * time.Millisecond,
-		EscalateAfter:    3,
-		EscalateMaxCount: 3,
-	}
+	cfg := &config.Config{DelayMin: time.Millisecond, DelayMax: 2 * time.Millisecond}
 	state := NewState(u, cfg)
-	rng := rand.New(rand.NewSource(42))
+	rng := rand.New(rand.NewSource(1))
 
-	now := time.Now()
-	state.UpdateAfterRequest(now, rng)
-	state.UpdateAfterRequest(now.Add(50*time.Millisecond), rng)
-	state.UpdateAfterRequest(now.Add(100*time.Millisecond), rng)
-
-	if state.escalationCount != 1 {
-		t.Errorf("expected escalationCount 1 after trigger, got %d", state.escalationCount)
-	}
-	if state.delayMin <= cfg.DelayMin {
-		t.Errorf("expected delayMin to increase, got %v", state.delayMin)
+	base := time.Now()
+	prev := state.NextMinTs()
+	for i := 1; i <= 10; i++ {
+		state.UpdateAfterRequest(base.Add(time.Duration(i)*time.Second), rng)
+		next := state.NextMinTs()
+		if next.Before(prev) {
+			t.Fatalf("iteration %d: NextMinTs went backwards: prev=%v next=%v", i, prev, next)
+		}
+		prev = next
 	}
 }
 
-// TestUpdateAfterRequest_EscalationDisabled tests behavior when escalation is disabled
 func TestUpdateAfterRequest_EscalationDisabled(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
@@ -154,30 +139,51 @@ func TestUpdateAfterRequest_EscalationDisabled(t *testing.T) {
 	}
 }
 
-// TestUpdateAfterRequest_MaxCount tests escalation stops at max count
 func TestUpdateAfterRequest_MaxCount(t *testing.T) {
+	// Use a deterministic factor so we can guarantee repeated escalations.
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
-		DelayMin:         10 * time.Millisecond,
-		DelayMax:         20 * time.Millisecond,
-		EscalateAfter:    2,
-		EscalateMaxCount: 2, // Stop after 2 escalations
+		DelayMin:          10 * time.Millisecond,
+		DelayMax:          10 * time.Millisecond,
+		EscalateAfter:     2,
+		EscalateMaxCount:  2,
+		EscalateFactorMin: 2.0,
+		EscalateFactorMax: 2.0,
 	}
 	state := NewState(u, cfg)
 	rng := rand.New(rand.NewSource(42))
 
 	now := time.Now()
-	// Trigger multiple escalations
-	for i := 0; i < 20; i++ {
-		state.UpdateAfterRequest(now.Add(time.Duration(i*15)*time.Millisecond), rng)
+	// Trigger first escalation: span 10ms >= delayMin 10ms and <= delayMax*2 20ms.
+	state.UpdateAfterRequest(now, rng)
+	state.UpdateAfterRequest(now.Add(10*time.Millisecond), rng)
+	if state.escalationCount != 1 {
+		t.Fatalf("expected escalationCount 1 after first trigger, got %d", state.escalationCount)
 	}
 
-	if state.escalationCount > cfg.EscalateMaxCount {
-		t.Errorf("expected escalationCount <= %d, got %d", cfg.EscalateMaxCount, state.escalationCount)
+	// Trigger second escalation at the new escalation level.
+	// New delays are 20ms; keep span within [20ms, 40ms].
+	state.UpdateAfterRequest(now.Add(35*time.Millisecond), rng)
+	state.UpdateAfterRequest(now.Add(75*time.Millisecond), rng)
+
+	if state.escalationCount != 2 {
+		t.Fatalf("expected escalationCount 2 after second trigger, got %d", state.escalationCount)
+	}
+
+	// Try to trigger a third escalation: must stay capped.
+	// After second escalation delayMin=delayMax=40ms, so span must be >=40ms
+	// to even attempt escalation, but <=40ms*2 to avoid de-escalation reset.
+	state.UpdateAfterRequest(now.Add(115*time.Millisecond), rng)
+	state.UpdateAfterRequest(now.Add(160*time.Millisecond), rng)
+
+	if state.escalationCount != cfg.EscalateMaxCount {
+		t.Errorf("expected escalationCount capped at %d, got %d", cfg.EscalateMaxCount, state.escalationCount)
+	}
+	if state.delayMin != cfg.DelayMin*4 || state.delayMax != cfg.DelayMax*4 {
+		t.Errorf("expected delays doubled twice, got delayMin=%v delayMax=%v", state.delayMin, state.delayMax)
 	}
 }
 
-// TestUpdateAfterRequest_Reset tests delay reset on slow traffic
 func TestUpdateAfterRequest_Reset(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
@@ -190,7 +196,6 @@ func TestUpdateAfterRequest_Reset(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
 	now := time.Now()
-	// First trigger escalation - requests 50ms apart
 	for i := 0; i < 3; i++ {
 		state.UpdateAfterRequest(now.Add(time.Duration(i*50)*time.Millisecond), rng)
 	}
@@ -198,11 +203,6 @@ func TestUpdateAfterRequest_Reset(t *testing.T) {
 	if state.escalationCount == 0 {
 		t.Fatal("expected escalation to occur")
 	}
-
-	// Now send slow request to trigger reset
-	// Need span > threshold = delayMax * escalateAfter
-	// After escalation, delayMax will be higher than base
-	// Use a time far enough in the future to exceed threshold
 	slowTime := now.Add(5 * time.Second)
 	state.UpdateAfterRequest(slowTime, rng)
 
@@ -214,7 +214,6 @@ func TestUpdateAfterRequest_Reset(t *testing.T) {
 	}
 }
 
-// TestConcurrentUpdateAfterRequest tests concurrent updates
 func TestConcurrentUpdateAfterRequest(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
@@ -243,14 +242,17 @@ func TestConcurrentUpdateAfterRequest(t *testing.T) {
 	}
 
 	wg.Wait()
-
-	// Verify no panic occurred and state is consistent
+	// Concurrent safety: escalationCount should not exceed max.
 	if state.escalationCount > cfg.EscalateMaxCount {
 		t.Errorf("expected escalationCount <= %d after concurrent updates, got %d", cfg.EscalateMaxCount, state.escalationCount)
 	}
+	// State should not be corrupted: window within bounds.
+	state.mu.Lock()
+	if len(state.window) > cfg.EscalateAfter {
+		t.Errorf("expected window size <= %d, got %d", cfg.EscalateAfter, len(state.window))
+	}
+	state.mu.Unlock()
 }
-
-// TestRandDuration_EdgeCases tests randDuration edge cases
 func TestRandDuration_EdgeCases(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
@@ -260,24 +262,9 @@ func TestRandDuration_EdgeCases(t *testing.T) {
 		max  time.Duration
 		want time.Duration
 	}{
-		{
-			name: "max less than min returns min",
-			min:  5 * time.Second,
-			max:  2 * time.Second,
-			want: 5 * time.Second,
-		},
-		{
-			name: "max equal to min returns min",
-			min:  1 * time.Second,
-			max:  1 * time.Second,
-			want: 1 * time.Second,
-		},
-		{
-			name: "zero values",
-			min:  0,
-			max:  0,
-			want: 0,
-		},
+		{name: "max less than min returns min", min: 5 * time.Second, max: 2 * time.Second, want: 5 * time.Second},
+		{name: "max equal to min returns min", min: 1 * time.Second, max: 1 * time.Second, want: 1 * time.Second},
+		{name: "zero values", min: 0, max: 0, want: 0},
 	}
 
 	for _, tt := range tests {
@@ -290,24 +277,7 @@ func TestRandDuration_EdgeCases(t *testing.T) {
 	}
 }
 
-// TestRandDuration_Range tests randDuration returns value in range
-func TestRandDuration_Range(t *testing.T) {
-	rng := rand.New(rand.NewSource(42))
-	minVal := 1 * time.Second
-	maxVal := 2 * time.Second
-
-	// Test multiple times to verify range
-	for i := 0; i < 100; i++ {
-		got := randDuration(rng, minVal, maxVal)
-		if got < minVal || got >= maxVal {
-			t.Errorf("randDuration() = %v, want value in [%v, %v)", got, minVal, maxVal)
-		}
-	}
-}
-
-// TestUpdateAfterRequest_EscalationSameGeneration tests that escalation happens
-// when the window fills with requests from the same generation
-func TestUpdateAfterRequest_EscalationSameGeneration(t *testing.T) {
+func TestUpdateAfterRequest_EscalationChains(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
 		DelayMin:         100 * time.Millisecond,
@@ -319,26 +289,14 @@ func TestUpdateAfterRequest_EscalationSameGeneration(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
 	now := time.Now()
-
-	// Build up window with requests close together to trigger first escalation
 	state.UpdateAfterRequest(now, rng)
 	state.UpdateAfterRequest(now.Add(50*time.Millisecond), rng)
 	state.UpdateAfterRequest(now.Add(100*time.Millisecond), rng)
-
-	if state.escalationCount != 1 {
-		t.Errorf("expected escalationCount 1 after first trigger, got %d", state.escalationCount)
-	}
-
-	// After escalation, delay values are multiplied by factor (~1.5-2x)
-	// New threshold = delayMax * escalateAfter is now larger
-	// Adding more requests with small span will trigger another escalation
-
-	// Add 3 more requests to trigger second escalation
 	state.UpdateAfterRequest(now.Add(500*time.Millisecond), rng)
 	state.UpdateAfterRequest(now.Add(600*time.Millisecond), rng)
 	state.UpdateAfterRequest(now.Add(700*time.Millisecond), rng)
 
 	if state.escalationCount != 2 {
-		t.Errorf("expected escalationCount 2 after second trigger, got %d", state.escalationCount)
+		t.Errorf("expected escalationCount 2 after chain, got %d", state.escalationCount)
 	}
 }

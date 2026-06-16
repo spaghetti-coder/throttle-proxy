@@ -1,4 +1,4 @@
-// Package config provides configuration loading for throttle-proxy.
+// Package config loads throttle-proxy configuration from environment variables.
 package config
 
 import (
@@ -10,32 +10,22 @@ import (
 	"time"
 )
 
+// Defaults for configuration values loaded from environment variables.
 const (
-	// DefaultPort is the default HTTP port for the proxy.
-	DefaultPort = 8080
-	// DefaultUpstreamTimeout is the default timeout for upstream requests in seconds.
-	DefaultUpstreamTimeout = 5
-	// DefaultDelayMin is the default minimum delay in seconds.
-	DefaultDelayMin = 0
-	// DefaultDelayMax is the default maximum delay in seconds.
-	DefaultDelayMax = 0
-	// DefaultMaxWait is the default maximum wait time for queue in seconds.
-	DefaultMaxWait = 0
-	// DefaultEscalateAfter is the default number of failures before escalation.
-	DefaultEscalateAfter = 0
-	// DefaultEscalateMaxCount is the default maximum escalation attempts.
-	DefaultEscalateMaxCount = 3
-	// DefaultEscalateFactorMin is the default minimum escalation factor.
+	DefaultPort              = 8080
+	DefaultUpstreamTimeout   = 5
+	DefaultDelayMin          = 0
+	DefaultDelayMax          = 0
+	DefaultMaxWait           = 0
+	DefaultEscalateAfter     = 0
+	DefaultEscalateMaxCount  = 3
 	DefaultEscalateFactorMin = 1.5
-	// DefaultEscalateFactorMax is the default maximum escalation factor.
 	DefaultEscalateFactorMax = 2.0
-	// DefaultQueueSize is the default request queue size.
-	DefaultQueueSize = 100
-	// MinQueueSize is the minimum allowed queue size.
-	MinQueueSize = 1
+	DefaultQueueSize         = 100
+	MinQueueSize             = 1
 )
 
-// Config holds all configuration for throttle-proxy.
+// Config holds throttle-proxy configuration.
 type Config struct {
 	Port              int
 	Upstreams         []*url.URL
@@ -51,7 +41,7 @@ type Config struct {
 	QueueSize         int
 }
 
-// Load parses configuration from environment variables.
+// Load returns configuration from environment variables.
 func Load(lookup func(string) string) (*Config, error) {
 	if lookup == nil {
 		lookup = os.Getenv
@@ -153,8 +143,9 @@ func Load(lookup func(string) string) (*Config, error) {
 	return cfg, nil
 }
 
-// MatchesEndpoints returns true if path matches any configured endpoint prefix.
-// "/search" matches "/search" and "/search/foo" but NOT "/searches".
+// MatchesEndpoints reports whether path matches any endpoint prefix.
+// A prefix matches itself and paths directly under it, but not siblings.
+// "/search" matches "/search" and "/search/foo", not "/searches".
 func MatchesEndpoints(path string, endpoints []string) bool {
 	for _, ep := range endpoints {
 		if ep == "/" {

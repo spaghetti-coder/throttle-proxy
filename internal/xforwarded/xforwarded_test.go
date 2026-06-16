@@ -5,77 +5,36 @@ import (
 	"testing"
 )
 
-// TestSetXForwardedFor_AppendsExisting verifies X-Forwarded-For is extended
-func TestSetXForwardedFor_AppendsExisting(t *testing.T) {
-	src := httptest.NewRequest("GET", "/test", nil)
-	src.Header.Set("X-Forwarded-For", "1.2.3.4")
-	src.RemoteAddr = "5.6.7.8:1234"
-
-	out := httptest.NewRequest("GET", "/test", nil)
-	SetXForwardedFor(out, src)
-
-	if got := out.Header.Get("X-Forwarded-For"); got != "1.2.3.4, 5.6.7.8:1234" {
-		t.Fatalf("expected XFF to append, got %q", got)
+func TestSetXForwardedFor(t *testing.T) {
+	cases := []struct {
+		name       string
+		xff        string
+		xRealIP    string
+		remoteAddr string
+		want       string
+	}{
+		{name: "append to existing XFF", xff: "1.2.3.4", remoteAddr: "5.6.7.8:1234", want: "1.2.3.4, 5.6.7.8:1234"},
+		{name: "use X-Real-IP when XFF missing", xRealIP: "1.2.3.4", remoteAddr: "5.6.7.8:1234", want: "1.2.3.4"},
+		{name: "fall back to RemoteAddr", remoteAddr: "5.6.7.8:1234", want: "5.6.7.8:1234"},
+		{name: "combine XFF chain and X-Real-IP", xff: "1.2.3.4, 2.3.4.5", xRealIP: "9.8.7.6", remoteAddr: "5.6.7.8:1234",
+			want: "1.2.3.4, 2.3.4.5, 9.8.7.6"},
+		{name: "build chain from XFF and RemoteAddr", xff: "client.ip, proxy1.ip", remoteAddr: "proxy2.ip:8080",
+			want: "client.ip, proxy1.ip, proxy2.ip:8080"},
 	}
-}
 
-// TestSetXForwardedFor_UsesRealIPWhenXFFMissing verifies fallback to X-Real-IP
-func TestSetXForwardedFor_UsesRealIPWhenXFFMissing(t *testing.T) {
-	src := httptest.NewRequest("GET", "/test", nil)
-	src.Header.Set("X-Real-IP", "1.2.3.4")
-	src.RemoteAddr = "5.6.7.8:1234"
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := httptest.NewRequest("GET", "/test", nil)
+			src.Header.Set("X-Forwarded-For", tc.xff)
+			src.Header.Set("X-Real-IP", tc.xRealIP)
+			src.RemoteAddr = tc.remoteAddr
 
-	out := httptest.NewRequest("GET", "/test", nil)
-	SetXForwardedFor(out, src)
+			out := httptest.NewRequest("GET", "/test", nil)
+			SetXForwardedFor(out, src)
 
-	if got := out.Header.Get("X-Forwarded-For"); got != "1.2.3.4" {
-		t.Fatalf("expected XFF to use X-Real-IP, got %q", got)
-	}
-}
-
-// TestSetXForwardedFor_UsesRemoteAddrFallback verifies fallback to RemoteAddr
-func TestSetXForwardedFor_UsesRemoteAddrFallback(t *testing.T) {
-	src := httptest.NewRequest("GET", "/test", nil)
-	src.RemoteAddr = "5.6.7.8:1234"
-
-	out := httptest.NewRequest("GET", "/test", nil)
-	SetXForwardedFor(out, src)
-
-	if got := out.Header.Get("X-Forwarded-For"); got != "5.6.7.8:1234" {
-		t.Fatalf("expected XFF to fall back to RemoteAddr, got %q", got)
-	}
-}
-
-// TestSetXForwardedFor_CombinesXFFAndXRealIP verifies X-Real-IP overrides RemoteAddr
-// when X-Forwarded-For is present, preserving the chain with the real client IP
-func TestSetXForwardedFor_CombinesXFFAndXRealIP(t *testing.T) {
-	src := httptest.NewRequest("GET", "/test", nil)
-	src.Header.Set("X-Forwarded-For", "1.2.3.4, 2.3.4.5")
-	src.Header.Set("X-Real-IP", "9.8.7.6")
-	src.RemoteAddr = "5.6.7.8:1234"
-
-	out := httptest.NewRequest("GET", "/test", nil)
-	SetXForwardedFor(out, src)
-
-	// X-Real-IP overrides RemoteAddr, but chain from XFF is preserved
-	// Current behavior: X-Real-IP is used as the clientIP to append
-	if got := out.Header.Get("X-Forwarded-For"); got != "1.2.3.4, 2.3.4.5, 9.8.7.6" {
-		t.Fatalf("expected XFF chain with X-Real-IP appended, got %q", got)
-	}
-}
-
-// TestSetXForwardedFor_ChainBuilding verifies RFC 7239 chain building behavior
-func TestSetXForwardedFor_ChainBuilding(t *testing.T) {
-	// Simulate a 3-hop proxy chain
-	src := httptest.NewRequest("GET", "/test", nil)
-	src.Header.Set("X-Forwarded-For", "client.ip, proxy1.ip")
-	src.RemoteAddr = "proxy2.ip:8080"
-
-	out := httptest.NewRequest("GET", "/test", nil)
-	SetXForwardedFor(out, src)
-
-	// Should append current hop to chain
-	if got := out.Header.Get("X-Forwarded-For"); got != "client.ip, proxy1.ip, proxy2.ip:8080" {
-		t.Fatalf("expected proper chain building, got %q", got)
+			if got := out.Header.Get("X-Forwarded-For"); got != tc.want {
+				t.Fatalf("X-Forwarded-For = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

@@ -10,7 +10,6 @@ func envLookup(env map[string]string) func(string) string {
 	return func(k string) string { return env[k] }
 }
 
-// TestLoad_RequiredEnv tests that UPSTREAM is required
 func TestLoad_RequiredEnv(t *testing.T) {
 	_, err := Load(envLookup(map[string]string{"UPSTREAM": ""}))
 	if err == nil {
@@ -21,42 +20,38 @@ func TestLoad_RequiredEnv(t *testing.T) {
 	}
 }
 
-// TestLoad_UpstreamParsing tests upstream URL parsing
 func TestLoad_UpstreamParsing(t *testing.T) {
 	tests := []struct {
-		name           string
 		env            map[string]string
+		name           string
 		wantErr        bool
 		wantErrContain string
 		wantCount      int
 		wantFirst      string
 	}{
 		{
-			name:      "single http upstream",
-			env:       map[string]string{"UPSTREAM": "http://localhost:8080"},
-			wantErr:   false,
-			wantCount: 1,
-			wantFirst: "http://localhost:8080",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080"},
+			name: "single http upstream", wantErr: false, wantCount: 1, wantFirst: "http://localhost:8080",
 		},
 		{
-			name:      "single https upstream",
-			env:       map[string]string{"UPSTREAM": "https://example.com"},
-			wantErr:   false,
-			wantCount: 1,
-			wantFirst: "https://example.com",
+			env:  map[string]string{"UPSTREAM": "https://example.com"},
+			name: "single https upstream", wantErr: false, wantCount: 1, wantFirst: "https://example.com",
 		},
 		{
-			name:      "multiple upstreams",
-			env:       map[string]string{"UPSTREAM": "http://localhost:8080, https://example.com"},
-			wantErr:   false,
-			wantCount: 2,
-			wantFirst: "http://localhost:8080",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080, https://example.com"},
+			name: "multiple upstreams", wantErr: false, wantCount: 2, wantFirst: "http://localhost:8080",
 		},
 		{
-			name:           "invalid scheme",
-			env:            map[string]string{"UPSTREAM": "ftp://example.com"},
-			wantErr:        true,
-			wantErrContain: "scheme must be http or https",
+			env:  map[string]string{"UPSTREAM": "ftp://example.com"},
+			name: "invalid scheme", wantErr: true, wantErrContain: "scheme must be http or https",
+		},
+		{
+			env:  map[string]string{"UPSTREAM": "://invalid-url"},
+			name: "malformed URL", wantErr: true, wantErrContain: "invalid UPSTREAM",
+		},
+		{
+			env:  map[string]string{"UPSTREAM": "  ,  ,  "},
+			name: "empty upstreams after trim", wantErr: true, wantErrContain: "UPSTREAM is required",
 		},
 	}
 
@@ -87,7 +82,6 @@ func TestLoad_UpstreamParsing(t *testing.T) {
 	}
 }
 
-// TestLoad_DefaultValues tests default values
 func TestLoad_DefaultValues(t *testing.T) {
 	cfg, err := Load(envLookup(map[string]string{"UPSTREAM": "http://localhost:8080"}))
 	if err != nil {
@@ -120,63 +114,42 @@ func TestLoad_DefaultValues(t *testing.T) {
 	}
 }
 
-// TestLoad_DelayRange tests DELAY variable parsing
 func TestLoad_DelayRange(t *testing.T) {
 	tests := []struct {
-		name       string
 		env        map[string]string
+		name       string
 		wantMin    time.Duration
 		wantMax    time.Duration
 		wantErr    bool
 		wantErrStr string
 	}{
 		{
-			name:    "constant delay",
-			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "5"},
-			wantMin: 5 * time.Second,
-			wantMax: 5 * time.Second,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "5"},
+			name: "constant delay", wantMin: 5 * time.Second, wantMax: 5 * time.Second,
 		},
 		{
-			name:    "range delay",
-			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "0.5:2"},
-			wantMin: 500 * time.Millisecond,
-			wantMax: 2 * time.Second,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "0.5:2"},
+			name: "range delay", wantMin: 500 * time.Millisecond, wantMax: 2 * time.Second,
 		},
 		{
-			name:    "max less than min clamp",
-			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "5:3"},
-			wantMin: 5 * time.Second,
-			wantMax: 5 * time.Second,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "5:3"},
+			name: "max less than min clamp", wantMin: 5 * time.Second, wantMax: 5 * time.Second,
 		},
 		{
-			name:    "default delay",
-			env:     map[string]string{"UPSTREAM": "http://localhost:8080"},
-			wantMin: 0,
-			wantMax: 0,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "foo"},
+			name: "invalid delay", wantErr: true, wantErrStr: "DELAY must be a number",
 		},
 		{
-			name:       "invalid delay",
-			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "foo"},
-			wantErr:    true,
-			wantErrStr: "DELAY must be a number",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "1:2:3"},
+			name: "multiple colons", wantErr: true, wantErrStr: "must have at most one colon",
 		},
 		{
-			name:       "multiple colons",
-			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "1:2:3"},
-			wantErr:    true,
-			wantErrStr: "must have at most one colon",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "-1"},
+			name: "negative delay", wantErr: true, wantErrStr: "must not be negative",
 		},
 		{
-			name:       "negative delay",
-			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "-1"},
-			wantErr:    true,
-			wantErrStr: "must not be negative",
-		},
-		{
-			name:       "negative delay max",
-			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "1:-2"},
-			wantErr:    true,
-			wantErrStr: "must not be negative",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "DELAY": "1:-2"},
+			name: "negative delay max", wantErr: true, wantErrStr: "must not be negative",
 		},
 	}
 
@@ -205,63 +178,43 @@ func TestLoad_DelayRange(t *testing.T) {
 	}
 }
 
-// TestLoad_EscalateFactor tests ESCALATE_FACTOR variable parsing
 func TestLoad_EscalateFactor(t *testing.T) {
 	tests := []struct {
-		name       string
 		env        map[string]string
+		name       string
 		wantMin    float64
 		wantMax    float64
 		wantErr    bool
 		wantErrStr string
 	}{
 		{
-			name:    "constant factor",
-			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5"},
-			wantMin: 1.5,
-			wantMax: 1.5,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5"},
+			name: "constant factor", wantMin: 1.5, wantMax: 1.5,
 		},
 		{
-			name:    "range factor",
-			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:2.0"},
-			wantMin: 1.5,
-			wantMax: 2.0,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:2.0"},
+			name: "range factor", wantMin: 1.5, wantMax: 2.0,
+		},
+
+		{
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "2.0:1.5"},
+			name: "max less than min clamp", wantMin: 2.0, wantMax: 2.0,
 		},
 		{
-			name:    "default factor",
-			env:     map[string]string{"UPSTREAM": "http://localhost:8080"},
-			wantMin: 1.5,
-			wantMax: 2.0,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:2.0:3.0"},
+			name: "multiple colons", wantErr: true, wantErrStr: "must have at most one colon",
 		},
 		{
-			name:    "max less than min clamp",
-			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "2.0:1.5"},
-			wantMin: 2.0,
-			wantMax: 2.0,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "foo"},
+			name: "invalid factor", wantErr: true, wantErrStr: "ESCALATE_FACTOR must be a number",
 		},
 		{
-			name:       "multiple colons",
-			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:2.0:3.0"},
-			wantErr:    true,
-			wantErrStr: "must have at most one colon",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "-1.5"},
+			name: "negative factor", wantErr: true, wantErrStr: "ESCALATE_FACTOR must not be negative",
 		},
 		{
-			name:       "invalid factor",
-			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "foo"},
-			wantErr:    true,
-			wantErrStr: "ESCALATE_FACTOR must be a number",
-		},
-		{
-			name:       "negative factor",
-			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "-1.5"},
-			wantErr:    true,
-			wantErrStr: "ESCALATE_FACTOR must not be negative",
-		},
-		{
-			name:       "negative factor max",
-			env:        map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:-2"},
-			wantErr:    true,
-			wantErrStr: "ESCALATE_FACTOR max must not be negative",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_FACTOR": "1.5:-2"},
+			name: "negative factor max", wantErr: true, wantErrStr: "ESCALATE_FACTOR max must not be negative",
 		},
 	}
 
@@ -290,7 +243,6 @@ func TestLoad_EscalateFactor(t *testing.T) {
 	}
 }
 
-// TestEnvSeconds_Empty tests envSeconds returns default when env var is empty
 func TestEnvSeconds_Empty(t *testing.T) {
 	lookup := envLookup(map[string]string{"TEST_TIMEOUT": ""})
 	duration, err := envSeconds("TEST_TIMEOUT", 5.0, lookup)
@@ -303,28 +255,15 @@ func TestEnvSeconds_Empty(t *testing.T) {
 	}
 }
 
-// TestEnvSeconds_Valid tests envSeconds parses valid duration
 func TestEnvSeconds_Valid(t *testing.T) {
 	tests := []struct {
 		name     string
 		value    string
 		expected time.Duration
 	}{
-		{
-			name:     "integer seconds",
-			value:    "10",
-			expected: 10 * time.Second,
-		},
-		{
-			name:     "float seconds",
-			value:    "0.5",
-			expected: 500 * time.Millisecond,
-		},
-		{
-			name:     "large value",
-			value:    "3600",
-			expected: 3600 * time.Second,
-		},
+		{name: "integer seconds", value: "10", expected: 10 * time.Second},
+		{name: "float seconds", value: "0.5", expected: 500 * time.Millisecond},
+		{name: "large value", value: "3600", expected: 3600 * time.Second},
 	}
 
 	for _, tt := range tests {
@@ -341,7 +280,6 @@ func TestEnvSeconds_Valid(t *testing.T) {
 	}
 }
 
-// TestEnvSeconds_Invalid tests envSeconds returns error for invalid values
 func TestEnvSeconds_Invalid(t *testing.T) {
 	lookup := envLookup(map[string]string{"TEST_TIMEOUT": "invalid"})
 	_, err := envSeconds("TEST_TIMEOUT", 5.0, lookup)
@@ -353,7 +291,6 @@ func TestEnvSeconds_Invalid(t *testing.T) {
 	}
 }
 
-// TestEnvSeconds_Zero tests envSeconds handles zero
 func TestEnvSeconds_Zero(t *testing.T) {
 	lookup := envLookup(map[string]string{"TEST_TIMEOUT": "0"})
 	duration, err := envSeconds("TEST_TIMEOUT", 5.0, lookup)
@@ -365,77 +302,48 @@ func TestEnvSeconds_Zero(t *testing.T) {
 	}
 }
 
-// TestLoad_EdgeCases tests edge cases and error paths
 func TestLoad_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name           string
 		env            map[string]string
+		name           string
 		wantErr        bool
 		wantErrContain string
 	}{
 		{
-			name:           "malformed URL",
-			env:            map[string]string{"UPSTREAM": "://invalid-url"},
-			wantErr:        true,
-			wantErrContain: "invalid UPSTREAM",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "UPSTREAM_TIMEOUT": "abc"},
+			name: "invalid upstream timeout", wantErr: true, wantErrContain: "UPSTREAM_TIMEOUT must be a number",
 		},
 		{
-			name:           "empty upstreams (only whitespace)",
-			env:            map[string]string{"UPSTREAM": "  ,  ,  "},
-			wantErr:        true,
-			wantErrContain: "UPSTREAM is required",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "PORT": "not-a-number"},
+			name: "invalid port", wantErr: true, wantErrContain: "PORT must be an integer",
 		},
 		{
-			name:           "invalid upstream timeout",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "UPSTREAM_TIMEOUT": "abc"},
-			wantErr:        true,
-			wantErrContain: "UPSTREAM_TIMEOUT must be a number",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "xyz"},
+			name: "invalid escalate after", wantErr: true, wantErrContain: "ESCALATE_AFTER must be an integer",
 		},
 		{
-			name:           "invalid port",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "PORT": "not-a-number"},
-			wantErr:        true,
-			wantErrContain: "PORT must be an integer",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "1"},
+			name: "escalate after value 1 too low", wantErr: true, wantErrContain: "ESCALATE_AFTER must be greater than 1",
 		},
 		{
-			name:           "invalid escalate after",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "xyz"},
-			wantErr:        true,
-			wantErrContain: "ESCALATE_AFTER must be an integer",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "2"},
+			name: "escalate after value 2 valid", wantErr: false,
 		},
 		{
-			name:           "escalate after value 1 too low",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "1"},
-			wantErr:        true,
-			wantErrContain: "ESCALATE_AFTER must be greater than 1",
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "0"},
+			name: "escalate after value 0 disabled valid", wantErr: false,
 		},
 		{
-			name:           "escalate after value 2 valid",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "2"},
-			wantErr:        false,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_MAX_COUNT": "xyz"},
+			name: "invalid escalate max count", wantErr: true, wantErrContain: "ESCALATE_MAX_COUNT must be an integer",
 		},
 		{
-			name:           "escalate after value 0 disabled valid",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "0"},
-			wantErr:        false,
+			env:  map[string]string{"UPSTREAM": "http://localhost:8080", "QUEUE_SIZE": "abc"},
+			name: "invalid queue size", wantErr: true, wantErrContain: "QUEUE_SIZE must be an integer",
 		},
 		{
-			name:           "invalid escalate max count",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_MAX_COUNT": "xyz"},
-			wantErr:        true,
-			wantErrContain: "ESCALATE_MAX_COUNT must be an integer",
-		},
-		{
-			name:           "invalid queue size",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "QUEUE_SIZE": "abc"},
-			wantErr:        true,
-			wantErrContain: "QUEUE_SIZE must be an integer",
-		},
-		{
-			name:           "whitespace around values",
-			env:            map[string]string{"UPSTREAM": "  http://localhost:8080  ", "PORT": "  9000  "},
-			wantErr:        false,
-			wantErrContain: "",
+			env:  map[string]string{"UPSTREAM": "  http://localhost:8080  ", "PORT": "  9000  "},
+			name: "whitespace around values", wantErr: false, wantErrContain: "",
 		},
 	}
 
@@ -465,7 +373,6 @@ func TestLoad_EdgeCases(t *testing.T) {
 	}
 }
 
-// TestLoad_MaxWait tests MAX_WAIT edge cases
 func TestLoad_MaxWait(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -473,17 +380,8 @@ func TestLoad_MaxWait(t *testing.T) {
 		wantErr    bool
 		wantErrStr string
 	}{
-		{
-			name:    "valid max wait",
-			maxWait: "30",
-			wantErr: false,
-		},
-		{
-			name:       "invalid max wait",
-			maxWait:    "invalid",
-			wantErr:    true,
-			wantErrStr: "MAX_WAIT must be a number",
-		},
+		{name: "valid max wait", maxWait: "30", wantErr: false},
+		{name: "invalid max wait", maxWait: "invalid", wantErr: true, wantErrStr: "MAX_WAIT must be a number"},
 	}
 
 	for _, tt := range tests {
@@ -510,38 +408,17 @@ func TestLoad_MaxWait(t *testing.T) {
 	}
 }
 
-// TestLoad_EndpointsEdgeCases tests edge cases in endpoint parsing
 func TestLoad_EndpointsEdgeCases(t *testing.T) {
 	tests := []struct {
-		name         string
-		endpoints    string
+		name          string
+		endpoints     string
 		wantEndpoints []string
 	}{
-		{
-			name:         "empty endpoints defaults to root",
-			endpoints:    "",
-			wantEndpoints: []string{"/"},
-		},
-		{
-			name:         "whitespace only endpoints defaults to root",
-			endpoints:    "   ",
-			wantEndpoints: []string{"/"},
-		},
-		{
-			name:         "single endpoint without slash",
-			endpoints:    "api",
-			wantEndpoints: []string{"api"},
-		},
-		{
-			name:         "endpoint with trailing slash",
-			endpoints:    "/api/",
-			wantEndpoints: []string{"/api"},
-		},
-		{
-			name:         "multiple endpoints",
-			endpoints:    "/api, /search",
-			wantEndpoints: []string{"/api", "/search"},
-		},
+		{name: "empty endpoints defaults to root", endpoints: "", wantEndpoints: []string{"/"}},
+		{name: "whitespace only endpoints defaults to root", endpoints: "   ", wantEndpoints: []string{"/"}},
+		{name: "single endpoint without slash", endpoints: "api", wantEndpoints: []string{"api"}},
+		{name: "endpoint with trailing slash", endpoints: "/api/", wantEndpoints: []string{"/api"}},
+		{name: "multiple endpoints", endpoints: "/api, /search", wantEndpoints: []string{"/api", "/search"}},
 	}
 
 	for _, tt := range tests {
@@ -567,38 +444,17 @@ func TestLoad_EndpointsEdgeCases(t *testing.T) {
 	}
 }
 
-// TestLoad_QueueSizeEdgeCases tests queue size edge cases
 func TestLoad_QueueSizeEdgeCases(t *testing.T) {
 	tests := []struct {
 		name      string
 		queueSize string
 		wantSize  int
 	}{
-		{
-			name:      "valid queue size",
-			queueSize: "5000",
-			wantSize:  5000,
-		},
-		{
-			name:      "zero queue size uses default",
-			queueSize: "0",
-			wantSize:  DefaultQueueSize,
-		},
-		{
-			name:      "negative queue size uses default",
-			queueSize: "-100",
-			wantSize:  DefaultQueueSize,
-		},
-		{
-			name:      "small positive queue size",
-			queueSize: "50",
-			wantSize:  50,
-		},
-		{
-			name:      "minimum queue size",
-			queueSize: "1",
-			wantSize:  1,
-		},
+		{name: "valid queue size", queueSize: "5000", wantSize: 5000},
+		{name: "zero queue size uses default", queueSize: "0", wantSize: DefaultQueueSize},
+		{name: "negative queue size uses default", queueSize: "-100", wantSize: DefaultQueueSize},
+		{name: "small positive queue size", queueSize: "50", wantSize: 50},
+		{name: "minimum queue size", queueSize: "1", wantSize: 1},
 	}
 
 	for _, tt := range tests {
@@ -618,7 +474,6 @@ func TestLoad_QueueSizeEdgeCases(t *testing.T) {
 	}
 }
 
-// TestMatchesEndpoints tests endpoint prefix matching
 func TestMatchesEndpoints(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -626,36 +481,11 @@ func TestMatchesEndpoints(t *testing.T) {
 		endpoints []string
 		want      bool
 	}{
-		{
-			name:      "exact match",
-			path:      "/search",
-			endpoints: []string{"/search"},
-			want:      true,
-		},
-		{
-			name:      "prefix match",
-			path:      "/search/foo/bar",
-			endpoints: []string{"/search"},
-			want:      true,
-		},
-		{
-			name:      "no match - similar prefix",
-			path:      "/searches",
-			endpoints: []string{"/search"},
-			want:      false,
-		},
-		{
-			name:      "root endpoint matches everything",
-			path:      "/anything",
-			endpoints: []string{"/"},
-			want:      true,
-		},
-		{
-			name:      "multiple endpoints - match second",
-			path:      "/api/v1/users",
-			endpoints: []string{"/search", "/api"},
-			want:      true,
-		},
+		{name: "exact match", path: "/search", endpoints: []string{"/search"}, want: true},
+		{name: "prefix match", path: "/search/foo/bar", endpoints: []string{"/search"}, want: true},
+		{name: "no match - similar prefix", path: "/searches", endpoints: []string{"/search"}, want: false},
+		{name: "root endpoint matches everything", path: "/anything", endpoints: []string{"/"}, want: true},
+		{name: "multiple endpoints - match second", path: "/api/v1/users", endpoints: []string{"/search", "/api"}, want: true},
 	}
 
 	for _, tt := range tests {
