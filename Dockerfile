@@ -1,5 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
-
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \

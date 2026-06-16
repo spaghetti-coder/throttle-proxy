@@ -2,9 +2,9 @@
 *
 
 # Only allow Go module and source files
+!**/*.go
 !go.mod
 !go.sum
-!cmd/
-!cmd/**
-!internal/
-!internal/**
+
+# Leave tests aside
+**/*_test.go
