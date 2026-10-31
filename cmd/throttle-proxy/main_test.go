@@ -1,12 +1,3 @@
-// Package main provides comprehensive unit tests for the throttle-proxy main package.
-// Tests cover signal handling, server lifecycle, configuration error handling,
-// and graceful shutdown scenarios.
-//
-// Test Design:
-//   - Tests use the run() function directly to test main logic without os.Exit()
-//   - Signal handling is tested by sending signals to channels
-//   - Server lifecycle is tested using net.Listener
-//   - Context cancellation is used to test shutdown scenarios
 package main
 
 import (
@@ -43,13 +34,11 @@ func TestSignalHandling_SIGTERM(t *testing.T) {
 	logger, logs := setupTestLogger()
 	sigChan := make(chan os.Signal, 1)
 
-	// Send SIGTERM after a short delay
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		sigChan <- syscall.SIGTERM
 	}()
 
-	// Valid config
 	envVars := map[string]string{
 		"UPSTREAM": "http://localhost:8080",
 	}
@@ -71,7 +60,6 @@ func TestSignalHandling_SIGINT(t *testing.T) {
 	logger, logs := setupTestLogger()
 	sigChan := make(chan os.Signal, 1)
 
-	// Send SIGINT after a short delay
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		sigChan <- syscall.SIGINT
@@ -98,7 +86,6 @@ func TestSignalHandling_MultipleSignals(t *testing.T) {
 	logger, _ := setupTestLogger()
 	sigChan := make(chan os.Signal, 2)
 
-	// Send multiple signals
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		sigChan <- syscall.SIGTERM
@@ -113,7 +100,6 @@ func TestSignalHandling_MultipleSignals(t *testing.T) {
 
 	exitCode := run(lookup, sigChan, nil, logger)
 
-	// Should exit cleanly with first signal
 	if exitCode != 0 {
 		t.Errorf("expected exit code 0, got %d", exitCode)
 	}
@@ -169,7 +155,6 @@ func TestConfigurationError_InvalidPort(t *testing.T) {
 func TestServerStartup_ValidConfig(t *testing.T) {
 	logger, logs := setupTestLogger()
 
-	// Create a listener on a random port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
@@ -206,7 +191,6 @@ func TestServerStartup_ValidConfig(t *testing.T) {
 func TestServerStartup_CustomPort(t *testing.T) {
 	logger, _ := setupTestLogger()
 
-	// Create a listener on a random port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
@@ -214,7 +198,6 @@ func TestServerStartup_CustomPort(t *testing.T) {
 
 	port := listener.Addr().(*net.TCPAddr).Port
 
-	// Close this listener and create a fresh one
 	listener.Close()
 
 	listener, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
@@ -245,11 +228,11 @@ func TestServerStartup_CustomPort(t *testing.T) {
 func TestDispatcherInitialization(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
-		Upstreams:         []*url.URL{u},
-		UpstreamTimeout:   5 * time.Second,
-		DelayMin:          1 * time.Second,
-		DelayMax:          2 * time.Second,
-		QueueSize:         100,
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		DelayMin:        1 * time.Second,
+		DelayMax:        2 * time.Second,
+		QueueSize:       100,
 	}
 
 	disp := dispatcher.New(cfg)
@@ -263,10 +246,10 @@ func TestDispatcherInitialization(t *testing.T) {
 func TestProxyHandlerInitialization(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
-		Upstreams:         []*url.URL{u},
-		UpstreamTimeout:   5 * time.Second,
-		Endpoints:         []string{"/test"},
-		QueueSize:         100,
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		Endpoints:       []string{"/test"},
+		QueueSize:       100,
 	}
 
 	disp := dispatcher.New(cfg)
@@ -281,25 +264,21 @@ func TestProxyHandlerInitialization(t *testing.T) {
 func TestContextCancellation(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
 	cfg := &config.Config{
-		Upstreams:         []*url.URL{u},
-		UpstreamTimeout:   5 * time.Second,
-		QueueSize:         10,
+		Upstreams:       []*url.URL{u},
+		UpstreamTimeout: 5 * time.Second,
+		QueueSize:       10,
 	}
 
 	disp := dispatcher.New(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Start dispatcher
 	go disp.Run(ctx)
 
-	// Cancel context
 	cancel()
 
-	// Give time for shutdown
 	time.Sleep(50 * time.Millisecond)
 
-	// Try to enqueue after cancellation - should return 503
 	req := httptest.NewRequest("GET", "/test", nil)
 	resultChan := disp.Enqueue(req)
 
@@ -351,18 +330,15 @@ func TestGracefulShutdown_Timeout(t *testing.T) {
 func TestServerErrorHandling(t *testing.T) {
 	logger, _ := setupTestLogger()
 
-	// Create first listener
 	listener1, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
 	}
 	defer listener1.Close()
 
-	// Create second listener on same port - this will fail
 	port := listener1.Addr().(*net.TCPAddr).Port
 	listener2, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err == nil {
-		// If we succeeded, close it and skip this test
 		listener2.Close()
 		t.Skip("Port was available, cannot test server error handling")
 	}
@@ -380,7 +356,6 @@ func TestServerErrorHandling(t *testing.T) {
 
 	exitCode := run(lookup, sigChan, listener1, logger)
 
-	// Should exit cleanly on SIGTERM
 	if exitCode != 0 {
 		t.Errorf("expected exit code 0, got %d", exitCode)
 	}
@@ -390,14 +365,12 @@ func TestServerErrorHandling(t *testing.T) {
 func TestMainIntegration(t *testing.T) {
 	logger, logs := setupTestLogger()
 
-	// Create an upstream server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}))
 	defer upstream.Close()
 
-	// Create listener
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
@@ -536,7 +509,6 @@ func TestDefaultLogger(t *testing.T) {
 		sigChan <- syscall.SIGTERM
 	}()
 
-	// Pass nil logger - should use default
 	exitCode := run(lookup, sigChan, nil, nil)
 
 	if exitCode != 0 {
@@ -548,7 +520,6 @@ func TestDefaultLogger(t *testing.T) {
 func TestServerErrorFromListener(t *testing.T) {
 	logger, logs := setupTestLogger()
 
-	// Create a listener
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
@@ -559,17 +530,14 @@ func TestServerErrorFromListener(t *testing.T) {
 	}
 	lookup := func(k string) string { return envVars[k] }
 
-	// Start server in background
 	sigChan := make(chan os.Signal, 1)
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		// Close listener to cause an error
 		listener.Close()
 	}()
 
 	exitCode := run(lookup, sigChan, listener, logger)
 
-	// Exit code should be 1 when server errors
 	if exitCode != 1 {
 		t.Errorf("expected exit code 1 for server error, got %d", exitCode)
 	}
@@ -583,30 +551,25 @@ func TestServerErrorFromListener(t *testing.T) {
 func TestShutdownTimeoutError(t *testing.T) {
 	logger, logs := setupTestLogger()
 
-	// Create a listener
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
 	}
 
-	// Create a blocking upstream that will delay shutdown
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Block until context is cancelled
 		<-r.Context().Done()
 	}))
 	defer upstream.Close()
 
 	envVars := map[string]string{
-		"UPSTREAM":       upstream.URL,
+		"UPSTREAM":         upstream.URL,
 		"UPSTREAM_TIMEOUT": "30",
 	}
 	lookup := func(k string) string { return envVars[k] }
 
-	// Start server
 	sigChan := make(chan os.Signal, 1)
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		// Send signal
 		sigChan <- syscall.SIGTERM
 	}()
 
@@ -617,7 +580,6 @@ func TestShutdownTimeoutError(t *testing.T) {
 		t.Errorf("expected exit code 0 or 1, got %d", exitCode)
 	}
 
-	// Should see shutdown message
 	if !strings.Contains(logs.String(), "shutting down") {
 		t.Error("expected 'shutting down' in logs")
 	}
@@ -627,7 +589,6 @@ func TestShutdownTimeoutError(t *testing.T) {
 func TestServerErrorExitCodePropagation(t *testing.T) {
 	logger, _ := setupTestLogger()
 
-	// Create a listener
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
@@ -638,17 +599,14 @@ func TestServerErrorExitCodePropagation(t *testing.T) {
 	}
 	lookup := func(k string) string { return envVars[k] }
 
-	// Start server in background
 	sigChan := make(chan os.Signal, 1)
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		// Close listener to cause an error
 		listener.Close()
 	}()
 
 	exitCode := run(lookup, sigChan, listener, logger)
 
-	// Should exit with code 1 on server error
 	if exitCode != 1 {
 		t.Errorf("expected exit code 1, got %d", exitCode)
 	}
@@ -663,9 +621,7 @@ func TestShutdownErrorExitCode(t *testing.T) {
 		t.Fatalf("failed to create listener: %v", err)
 	}
 
-	// Create an upstream that will make shutdown difficult
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Keep connection open
 		w.Header().Set("Content-Length", "10")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("partial"))
@@ -692,7 +648,6 @@ func TestShutdownErrorExitCode(t *testing.T) {
 		t.Errorf("expected exit code 0 or 1, got %d", exitCode)
 	}
 
-	// Should see shutdown message
 	if !strings.Contains(logs.String(), "shutting down") {
 		t.Error("expected 'shutting down' in logs")
 	}
@@ -702,7 +657,6 @@ func TestShutdownErrorExitCode(t *testing.T) {
 func TestServerErrorWithShutdownError(t *testing.T) {
 	logger, logs := setupTestLogger()
 
-	// Create a listener
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
@@ -713,17 +667,14 @@ func TestServerErrorWithShutdownError(t *testing.T) {
 	}
 	lookup := func(k string) string { return envVars[k] }
 
-	// Close listener to cause immediate server error
 	listener.Close()
 
 	sigChan := make(chan os.Signal, 1)
 	go func() {
-		// Send signal after delay to trigger shutdown
 		time.Sleep(100 * time.Millisecond)
 		sigChan <- syscall.SIGTERM
 	}()
 
-	// Create a new listener for the actual test
 	listener, err = net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
@@ -731,12 +682,10 @@ func TestServerErrorWithShutdownError(t *testing.T) {
 
 	exitCode := run(lookup, sigChan, listener, logger)
 
-	// Should have "shutting down" in logs
 	if !strings.Contains(logs.String(), "shutting down") {
 		t.Error("expected 'shutting down' in logs")
 	}
 
-	// Exit code should be 0 (graceful shutdown)
 	if exitCode != 0 {
 		t.Logf("exit code: %d, logs: %s", exitCode, logs.String())
 	}
@@ -752,12 +701,10 @@ func TestNilGetenv(t *testing.T) {
 		sigChan <- syscall.SIGTERM
 	}()
 
-	// Set UPSTREAM env var temporarily
 	oldUpstream := os.Getenv("UPSTREAM")
 	os.Setenv("UPSTREAM", "http://localhost:8080")
 	defer os.Setenv("UPSTREAM", oldUpstream)
 
-	// Pass nil getenv - should use os.Getenv
 	exitCode := run(nil, sigChan, nil, logger)
 
 	if exitCode != 0 {

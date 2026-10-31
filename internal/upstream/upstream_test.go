@@ -14,7 +14,6 @@ import (
 
 func init() {
 	// Disable slog output during tests
-	// This prevents log noise from checkEscalation
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelError,
 	})))
@@ -167,7 +166,6 @@ func TestUpdateAfterRequest_MaxCount(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
 	now := time.Now()
-	// Trigger multiple escalations
 	for i := 0; i < 20; i++ {
 		state.UpdateAfterRequest(now.Add(time.Duration(i*15)*time.Millisecond), rng)
 	}
@@ -190,7 +188,6 @@ func TestUpdateAfterRequest_Reset(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 
 	now := time.Now()
-	// First trigger escalation - requests 50ms apart
 	for i := 0; i < 3; i++ {
 		state.UpdateAfterRequest(now.Add(time.Duration(i*50)*time.Millisecond), rng)
 	}
@@ -199,10 +196,7 @@ func TestUpdateAfterRequest_Reset(t *testing.T) {
 		t.Fatal("expected escalation to occur")
 	}
 
-	// Now send slow request to trigger reset
 	// Need span > threshold = delayMax * escalateAfter
-	// After escalation, delayMax will be higher than base
-	// Use a time far enough in the future to exceed threshold
 	slowTime := now.Add(5 * time.Second)
 	state.UpdateAfterRequest(slowTime, rng)
 
@@ -244,7 +238,6 @@ func TestConcurrentUpdateAfterRequest(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify no panic occurred and state is consistent
 	if state.escalationCount > cfg.EscalateMaxCount {
 		t.Errorf("expected escalationCount <= %d after concurrent updates, got %d", cfg.EscalateMaxCount, state.escalationCount)
 	}
@@ -296,7 +289,6 @@ func TestRandDuration_Range(t *testing.T) {
 	minVal := 1 * time.Second
 	maxVal := 2 * time.Second
 
-	// Test multiple times to verify range
 	for i := 0; i < 100; i++ {
 		got := randDuration(rng, minVal, maxVal)
 		if got < minVal || got >= maxVal {
@@ -320,7 +312,6 @@ func TestUpdateAfterRequest_EscalationSameGeneration(t *testing.T) {
 
 	now := time.Now()
 
-	// Build up window with requests close together to trigger first escalation
 	state.UpdateAfterRequest(now, rng)
 	state.UpdateAfterRequest(now.Add(50*time.Millisecond), rng)
 	state.UpdateAfterRequest(now.Add(100*time.Millisecond), rng)
@@ -329,11 +320,7 @@ func TestUpdateAfterRequest_EscalationSameGeneration(t *testing.T) {
 		t.Errorf("expected escalationCount 1 after first trigger, got %d", state.escalationCount)
 	}
 
-	// After escalation, delay values are multiplied by factor (~1.5-2x)
-	// New threshold = delayMax * escalateAfter is now larger
-	// Adding more requests with small span will trigger another escalation
-
-	// Add 3 more requests to trigger second escalation
+	// The window must refill at the new level before it can escalate again.
 	state.UpdateAfterRequest(now.Add(500*time.Millisecond), rng)
 	state.UpdateAfterRequest(now.Add(600*time.Millisecond), rng)
 	state.UpdateAfterRequest(now.Add(700*time.Millisecond), rng)

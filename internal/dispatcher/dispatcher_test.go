@@ -71,7 +71,6 @@ func TestEnqueue(t *testing.T) {
 	}
 	d := New(cfg)
 
-	// Create test request
 	body := []byte("test body")
 	req := httptest.NewRequest("POST", "/test", bytes.NewReader(body))
 
@@ -84,8 +83,7 @@ func TestEnqueue(t *testing.T) {
 
 // TestEnqueue_FullQueue tests that Enqueue returns 503 when the queue is at capacity
 func TestEnqueue_FullQueue(t *testing.T) {
-	// Create an upstream that blocks until context is cancelled so Run
-	// cannot quickly drain the queue.
+	// Upstream blocks until cancel so Run cannot drain the queue.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
@@ -103,18 +101,15 @@ func TestEnqueue_FullQueue(t *testing.T) {
 	go d.Run(ctx)
 	defer cancel()
 
-	// Give Run time to start
 	time.Sleep(10 * time.Millisecond)
 
 	// Fill the queue: req1 will be picked up by Run and block in fireRequest
 	req1 := httptest.NewRequest("GET", "/test1", nil)
 	_ = d.Enqueue(req1)
 
-	// req2 should go into the queue buffer (capacity 1)
 	req2 := httptest.NewRequest("GET", "/test2", nil)
 	_ = d.Enqueue(req2)
 
-	// Give Run time to pick up req1
 	time.Sleep(50 * time.Millisecond)
 
 	// req3 should trigger queue full — immediate 503
@@ -158,17 +153,13 @@ func TestRun_DrainsQueuedRequestsOnShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go d.Run(ctx)
 
-	// Enqueue a request that will be picked up and block in fireRequest
 	req1 := httptest.NewRequest("GET", "/test", nil)
 	resultChan1 := d.Enqueue(req1)
-	// Give Run time to start dispatching req1
 	time.Sleep(50 * time.Millisecond)
 
-	// Enqueue another request that should remain in the queue buffer
 	req2 := httptest.NewRequest("GET", "/test", nil)
 	resultChan2 := d.Enqueue(req2)
 
-	// Cancel context: Run should drain the remaining queued request(s)
 	cancel()
 
 	// req1's dispatch will ultimately fail (context cancelled)
@@ -208,13 +199,10 @@ func TestEnqueue_AfterStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go d.Run(ctx)
 
-	// Give Run time to start
 	time.Sleep(10 * time.Millisecond)
 
-	// Stop dispatcher
 	cancel()
 
-	// Give Run time to exit and close done channel
 	time.Sleep(50 * time.Millisecond)
 
 	// Enqueue after stop — must not block
@@ -250,7 +238,6 @@ func TestEnqueue_ReadBodyError(t *testing.T) {
 	}
 	d := New(cfg)
 
-	// Create a request with a body that returns an error on read
 	req := httptest.NewRequest("POST", "/test", &errorReader{err: fmt.Errorf("read failed")})
 
 	resultChan := d.Enqueue(req)
@@ -306,7 +293,6 @@ func TestCopyHeaders_HopByHopExcluded(t *testing.T) {
 	dst := make(http.Header)
 	copyHeaders(dst, src)
 
-	// These should be present
 	if dst.Get("Content-Type") != "application/json" {
 		t.Error("expected Content-Type to be copied")
 	}
@@ -314,7 +300,6 @@ func TestCopyHeaders_HopByHopExcluded(t *testing.T) {
 		t.Error("expected X-Custom-Header to be copied")
 	}
 
-	// These should be excluded
 	if dst.Get("Connection") != "" {
 		t.Error("expected Connection to be excluded")
 	}
@@ -340,7 +325,6 @@ func TestCopyHeaders_ConnectionHeaderValues(t *testing.T) {
 	dst := make(http.Header)
 	copyHeaders(dst, src)
 
-	// Connection header itself should be excluded
 	if dst.Get("Connection") != "" {
 		t.Error("expected Connection header to be excluded")
 	}
@@ -350,7 +334,6 @@ func TestCopyHeaders_ConnectionHeaderValues(t *testing.T) {
 		t.Error("expected X-Custom to be excluded (listed in Connection)")
 	}
 
-	// Content-Type should be present
 	if dst.Get("Content-Type") != "application/json" {
 		t.Error("expected Content-Type to be copied")
 	}
@@ -378,9 +361,7 @@ func TestCopyHeaders_MultipleValues(t *testing.T) {
 
 // TestFireRequest_Success tests successful request to upstream
 func TestFireRequest_Success(t *testing.T) {
-	// Create mock upstream server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request
 		if r.Method != "GET" {
 			t.Errorf("expected method GET, got %s", r.Method)
 		}
@@ -406,7 +387,6 @@ func TestFireRequest_Success(t *testing.T) {
 	}
 	d := New(cfg)
 
-	// Create proxy request
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Custom", "value")
 
@@ -420,10 +400,8 @@ func TestFireRequest_Success(t *testing.T) {
 		ctx:        context.Background(),
 	}
 
-	// Get state
 	state := d.states[0]
 
-	// Fire request
 	ctx := context.Background()
 	result, err := d.fireRequest(ctx, pr, state)
 
@@ -443,7 +421,6 @@ func TestFireRequest_Success(t *testing.T) {
 
 // TestFireRequest_WithBody tests request body forwarding
 func TestFireRequest_WithBody(t *testing.T) {
-	// Create mock upstream server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if string(body) != "test body" {
@@ -460,7 +437,6 @@ func TestFireRequest_WithBody(t *testing.T) {
 	}
 	d := New(cfg)
 
-	// Create proxy request with body
 	req := httptest.NewRequest("POST", "/test", bytes.NewReader([]byte("test body")))
 
 	pr := &proxyRequest{
@@ -483,7 +459,6 @@ func TestFireRequest_WithBody(t *testing.T) {
 
 // TestFireRequest_UpstreamError tests handling of upstream errors
 func TestFireRequest_UpstreamError(t *testing.T) {
-	// Create mock upstream server that returns 500
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		if _, err := w.Write([]byte("server error")); err != nil {
@@ -532,7 +507,6 @@ func TestDispatch_MaxWaitTimeout(t *testing.T) {
 	}
 	d := New(cfg)
 
-	// Create request with short max wait
 	req := httptest.NewRequest("GET", "/test", nil)
 	pr := &proxyRequest{
 		r:          req,
@@ -587,25 +561,21 @@ func TestDispatch_ContextCancellation(t *testing.T) {
 		ctx:        context.Background(),
 	}
 
-	// Create context that we'll cancel
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Start dispatch in goroutine
 	dispatchDone := make(chan bool)
 	go func() {
 		d.dispatch(ctx, pr)
 		dispatchDone <- true
 	}()
 
-	// Cancel context after short delay
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 
-	// Wait for dispatch to complete
 	<-dispatchDone
 
 	result := <-pr.resultChan
-	// Context cancellation during request returns 502 from fireRequest
+	// Cancellation mid-request is an upstream error, so dispatch ends at the all-failed 502.
 	if result.StatusCode != http.StatusBadGateway {
 		t.Logf("Got status code %d with error: %v", result.StatusCode, result.Err)
 	}

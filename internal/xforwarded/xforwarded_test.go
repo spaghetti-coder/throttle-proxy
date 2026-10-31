@@ -57,8 +57,6 @@ func TestSetXForwardedFor_CombinesXFFAndXRealIP(t *testing.T) {
 	out := httptest.NewRequest("GET", "/test", nil)
 	SetXForwardedFor(out, src)
 
-	// X-Real-IP overrides RemoteAddr, but chain from XFF is preserved
-	// Current behavior: X-Real-IP is used as the clientIP to append
 	if got := out.Header.Get("X-Forwarded-For"); got != "1.2.3.4, 2.3.4.5, 9.8.7.6" {
 		t.Fatalf("expected XFF chain with X-Real-IP appended, got %q", got)
 	}
@@ -66,7 +64,6 @@ func TestSetXForwardedFor_CombinesXFFAndXRealIP(t *testing.T) {
 
 // TestSetXForwardedFor_ChainBuilding verifies RFC 7239 chain building behavior
 func TestSetXForwardedFor_ChainBuilding(t *testing.T) {
-	// Simulate a 3-hop proxy chain
 	src := httptest.NewRequest("GET", "/test", nil)
 	src.Header.Set("X-Forwarded-For", "client.ip, proxy1.ip")
 	src.RemoteAddr = "proxy2.ip:8080"
@@ -74,7 +71,6 @@ func TestSetXForwardedFor_ChainBuilding(t *testing.T) {
 	out := httptest.NewRequest("GET", "/test", nil)
 	SetXForwardedFor(out, src)
 
-	// Should append current hop to chain
 	if got := out.Header.Get("X-Forwarded-For"); got != "client.ip, proxy1.ip, proxy2.ip:8080" {
 		t.Fatalf("expected proper chain building, got %q", got)
 	}

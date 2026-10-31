@@ -64,7 +64,6 @@ func TestNewHandler(t *testing.T) {
 
 // TestServeHTTP_ThrottledPath tests requests that should be throttled
 func TestServeHTTP_ThrottledPath(t *testing.T) {
-	// Create mock upstream that returns success
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -86,12 +85,10 @@ func TestServeHTTP_ThrottledPath(t *testing.T) {
 	disp := dispatcher.New(cfg)
 	handler := NewHandler(cfg, disp)
 
-	// Start dispatcher
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
 
-	// Wait for dispatcher to start
 	time.Sleep(10 * time.Millisecond)
 
 	req := httptest.NewRequest("GET", "/search?q=test", nil)
@@ -99,8 +96,7 @@ func TestServeHTTP_ThrottledPath(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	// Note: Since we're using real dispatcher in test, response may vary
-	// We mainly verify no panic occurs and request is processed
+	// Enqueue replies 503 while disp.Run has not started yet.
 	if rr.Code != http.StatusOK && rr.Code != http.StatusServiceUnavailable {
 		t.Logf("Got status code: %d", rr.Code)
 	}
@@ -108,7 +104,6 @@ func TestServeHTTP_ThrottledPath(t *testing.T) {
 
 // TestServeHTTP_PassthroughPath tests requests that should passthrough
 func TestServeHTTP_PassthroughPath(t *testing.T) {
-	// Create a mock upstream server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Upstream-Header", "value")
 		w.WriteHeader(http.StatusOK)
@@ -150,7 +145,6 @@ func TestServeHTTP_PassthroughRoundRobin(t *testing.T) {
 	var requestCounts []int
 	var mu sync.Mutex
 
-	// Create mock upstream servers
 	upstream1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		requestCounts[0]++
@@ -184,10 +178,8 @@ func TestServeHTTP_PassthroughRoundRobin(t *testing.T) {
 	disp := dispatcher.New(cfg)
 	handler := NewHandler(cfg, disp)
 
-	// Reset counters
 	requestCounts = make([]int, 2)
 
-	// Make 4 requests
 	for i := 0; i < 4; i++ {
 		req := httptest.NewRequest("GET", "/static/file.txt", nil)
 		rr := httptest.NewRecorder()
@@ -280,7 +272,6 @@ func TestServeHTTP_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			// Use passthrough path to avoid dispatcher
 			req := httptest.NewRequest("GET", "/api/test", nil)
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)

@@ -410,14 +410,14 @@ func TestLoad_EdgeCases(t *testing.T) {
 			wantErrContain: "ESCALATE_AFTER must be greater than 1",
 		},
 		{
-			name:           "escalate after value 2 valid",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "2"},
-			wantErr:        false,
+			name:    "escalate after value 2 valid",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "2"},
+			wantErr: false,
 		},
 		{
-			name:           "escalate after value 0 disabled valid",
-			env:            map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "0"},
-			wantErr:        false,
+			name:    "escalate after value 0 disabled valid",
+			env:     map[string]string{"UPSTREAM": "http://localhost:8080", "ESCALATE_AFTER": "0"},
+			wantErr: false,
 		},
 		{
 			name:           "invalid escalate max count",
@@ -513,33 +513,33 @@ func TestLoad_MaxWait(t *testing.T) {
 // TestLoad_EndpointsEdgeCases tests edge cases in endpoint parsing
 func TestLoad_EndpointsEdgeCases(t *testing.T) {
 	tests := []struct {
-		name         string
-		endpoints    string
+		name          string
+		endpoints     string
 		wantEndpoints []string
 	}{
 		{
-			name:         "empty endpoints defaults to root",
-			endpoints:    "",
+			name:          "empty endpoints defaults to root",
+			endpoints:     "",
 			wantEndpoints: []string{"/"},
 		},
 		{
-			name:         "whitespace only endpoints defaults to root",
-			endpoints:    "   ",
+			name:          "whitespace only endpoints defaults to root",
+			endpoints:     "   ",
 			wantEndpoints: []string{"/"},
 		},
 		{
-			name:         "single endpoint without slash",
-			endpoints:    "api",
+			name:          "single endpoint without slash",
+			endpoints:     "api",
 			wantEndpoints: []string{"api"},
 		},
 		{
-			name:         "endpoint with trailing slash",
-			endpoints:    "/api/",
+			name:          "endpoint with trailing slash",
+			endpoints:     "/api/",
 			wantEndpoints: []string{"/api"},
 		},
 		{
-			name:         "multiple endpoints",
-			endpoints:    "/api, /search",
+			name:          "multiple endpoints",
+			endpoints:     "/api, /search",
 			wantEndpoints: []string{"/api", "/search"},
 		},
 	}

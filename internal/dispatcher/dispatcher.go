@@ -20,15 +20,7 @@ import (
 	"throttle-proxy/internal/xforwarded"
 )
 
-// hopByHopHeaders lists headers that must be removed when proxying requests,
-// as per RFC 2616 Section 13.5.1. These headers are hop-by-hop headers and
-// should not be forwarded between clients and origins across proxies.
-//
-// Categories of hop-by-hop headers:
-//   - Connection management: Connection, Keep-Alive, Proxy-Connection
-//   - Proxy authentication: Proxy-Authenticate, Proxy-Authorization
-//   - Protocol upgrades: Upgrade, TE
-//   - Transfer encoding: Transfer-Encoding, Trailer (note: Trailers header, not Trailer)
+// hopByHopHeaders must not be forwarded between hops (RFC 2616 §13.5.1).
 var hopByHopHeaders = []string{
 	"Connection",
 	"Keep-Alive",
@@ -41,22 +33,11 @@ var hopByHopHeaders = []string{
 	"Upgrade",
 }
 
-// HTTP status codes used by the dispatcher.
-// Using named constants improves readability and maintainability.
 const (
-	// statusQueueFull is returned when the request queue is at capacity.
-	statusQueueFull = http.StatusServiceUnavailable
-
-	// statusShuttingDown is returned when the dispatcher is stopping
-	// and cannot accept new requests.
-	statusShuttingDown = http.StatusServiceUnavailable
-
-	// statusMaxWaitExceeded is returned when a request has been waiting
-	// in the queue longer than its configured max wait time.
+	statusQueueFull       = http.StatusServiceUnavailable
+	statusShuttingDown    = http.StatusServiceUnavailable
 	statusMaxWaitExceeded = http.StatusServiceUnavailable
 
-	// statusAllUpstreamsFailed is returned when all upstream servers
-	// fail to respond or return 5xx errors.
 	statusAllUpstreamsFailed = http.StatusBadGateway
 )
 
@@ -156,7 +137,6 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 func (d *Dispatcher) Run(ctx context.Context) {
 	d.running.Store(true)
 	defer func() {
-		// Drain any remaining queued requests after shutdown.
 		d.running.Store(false)
 	}()
 	for {
@@ -177,16 +157,9 @@ func (d *Dispatcher) Run(ctx context.Context) {
 	}
 }
 
-// dispatch implements Earliest Deadline First (EDF) scheduling for request dispatch.
-//
-// Algorithm overview:
-//  1. For each upstream, get the next available timestamp (deadline)
-//  2. Sort upstreams by deadline (earliest first)
-//  3. Try each upstream in order: wait until available, then send request
-//  4. If the request succeeds (status < 500), return the response
-//  5. If all upstreams fail, return 502 Bad Gateway
-//
-// This ensures fair scheduling across all upstreams while respecting rate limits.
+// dispatch sends pr upstream using earliest-deadline-first: upstreams are tried in
+// order of next availability, failing over on transport errors and 5xx. 429/403 are
+// returned as-is without failover; a 502 results when every upstream fails.
 func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 	select {
 	case <-ctx.Done():
@@ -196,16 +169,12 @@ func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 	default:
 	}
 
-	// Check if request has exceeded its maximum wait time in the queue.
-	// If maxWait is configured and exceeded, fail fast with 503.
 	if pr.maxWait > 0 && time.Since(pr.enqueuedAt) >= pr.maxWait {
 		slog.Warn("max wait exceeded", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr, "max_wait", pr.maxWait)
 		pr.resultChan <- Result{StatusCode: statusMaxWaitExceeded, Err: fmt.Errorf("max wait exceeded")}
 		return
 	}
 
-	// Build list of upstream candidates with their next available timestamps.
-	// The EDF algorithm selects the upstream with the earliest deadline.
 	type candidate struct {
 		state *upstream.State
 		ts    time.Time
@@ -214,16 +183,12 @@ func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 	for i, s := range d.states {
 		candidates[i] = candidate{s, s.NextMinTs()}
 	}
-	// Sort by deadline (earliest first) - this is the core EDF scheduling decision.
 	sort.Slice(candidates, func(a, b int) bool {
 		return candidates[a].ts.Before(candidates[b].ts)
 	})
 
-	// Try each upstream in EDF order, waiting as needed and failing over on errors.
 	now := time.Now()
 	for _, c := range candidates {
-		// Wait until this upstream becomes available (respects rate limiting).
-		// This timer enforces the delay between requests to avoid rate limits.
 		if c.ts.After(now) {
 			timer := time.NewTimer(c.ts.Sub(now))
 			select {
@@ -270,8 +235,6 @@ func (d *Dispatcher) dispatch(ctx context.Context, pr *proxyRequest) {
 		return
 	}
 
-	// All upstreams failed - return 502 Bad Gateway as per HTTP specification.
-	// This indicates the proxy cannot get a valid response from upstream.
 	slog.Error("all upstreams failed", "method", pr.r.Method, "path", pr.r.URL.Path, "client", pr.r.RemoteAddr)
 	pr.resultChan <- Result{StatusCode: statusAllUpstreamsFailed, Err: fmt.Errorf("all upstreams failed")}
 }

@@ -21,7 +21,7 @@ const (
 	DefaultDelayMax = 0
 	// DefaultMaxWait is the default maximum wait time for queue in seconds.
 	DefaultMaxWait = 0
-	// DefaultEscalateAfter is the default number of failures before escalation.
+	// DefaultEscalateAfter is the default escalation window size; 0 disables escalation.
 	DefaultEscalateAfter = 0
 	// DefaultEscalateMaxCount is the default maximum escalation attempts.
 	DefaultEscalateMaxCount = 3
@@ -36,6 +36,8 @@ const (
 )
 
 // Config holds all configuration for throttle-proxy.
+// Zero DelayMin/DelayMax means no delay; zero MaxWait and zero EscalateAfter disable
+// those limits.
 type Config struct {
 	Port              int
 	Upstreams         []*url.URL
