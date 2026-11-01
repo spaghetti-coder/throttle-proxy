@@ -119,7 +119,9 @@ func TestE2E_MultiUpstreamFailoverChain(t *testing.T) {
 	upstreams[0] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		counters[0].Add(1)
 		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte("Error from upstream 1"))
+		if _, err := w.Write([]byte("Error from upstream 1")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstreams[0].Close()
 
@@ -127,7 +129,9 @@ func TestE2E_MultiUpstreamFailoverChain(t *testing.T) {
 	upstreams[1] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		counters[1].Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Error from upstream 2"))
+		if _, err := w.Write([]byte("Error from upstream 2")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstreams[1].Close()
 
@@ -135,7 +139,9 @@ func TestE2E_MultiUpstreamFailoverChain(t *testing.T) {
 	upstreams[2] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		counters[2].Add(1)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Success from upstream 3"))
+		if _, err := w.Write([]byte("Success from upstream 3")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstreams[2].Close()
 
@@ -156,7 +162,7 @@ func TestE2E_MultiUpstreamFailoverChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 
@@ -194,7 +200,9 @@ func TestE2E_MultiUpstreamFailoverFirstHealthy(t *testing.T) {
 	upstreams[1] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		counters[1].Add(1)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK from upstream 2"))
+		if _, err := w.Write([]byte("OK from upstream 2")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstreams[1].Close()
 
@@ -222,7 +230,7 @@ func TestE2E_MultiUpstreamFailoverFirstHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 
@@ -254,14 +262,18 @@ func TestE2E_RateLimitNotFailedOver(t *testing.T) {
 			limited := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				limitedHits.Add(1)
 				w.WriteHeader(status)
-				w.Write([]byte("rate limited"))
+				if _, err := w.Write([]byte("rate limited")); err != nil {
+					t.Errorf("failed to write response: %v", err)
+				}
 			}))
 			defer limited.Close()
 
 			healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				healthyHits.Add(1)
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("OK"))
+				if _, err := w.Write([]byte("OK")); err != nil {
+					t.Errorf("failed to write response: %v", err)
+				}
 			}))
 			defer healthy.Close()
 
@@ -276,7 +288,7 @@ func TestE2E_RateLimitNotFailedOver(t *testing.T) {
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			body, _ := io.ReadAll(resp.Body)
 
 			if resp.StatusCode != status {
@@ -302,7 +314,9 @@ func TestE2E_BodyStreaming(t *testing.T) {
 		w.Header().Set("Content-Type", r.Header.Get("Content-Type"))
 		w.Header().Set("X-Original-Content-Length", r.Header.Get("Content-Length"))
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		if _, err := w.Write(body); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -334,7 +348,7 @@ func TestE2E_BodyStreaming(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("Expected status 200, got %d", resp.StatusCode)
@@ -368,7 +382,9 @@ func TestE2E_BodyStreamingChunked(t *testing.T) {
 		receivedBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
-		w.Write(receivedBody)
+		if _, err := w.Write(receivedBody); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -394,7 +410,7 @@ func TestE2E_BodyStreamingChunked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 
@@ -412,7 +428,9 @@ func TestE2E_QueueBackpressure(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -442,8 +460,8 @@ func TestE2E_QueueBackpressure(t *testing.T) {
 				mu.Unlock()
 				return
 			}
-			defer resp.Body.Close()
-			io.Copy(io.Discard, resp.Body)
+			defer func() { _ = resp.Body.Close() }()
+			_, _ = io.Copy(io.Discard, resp.Body)
 			mu.Lock()
 			responses[idx] = resp.StatusCode
 			mu.Unlock()
@@ -501,10 +519,13 @@ func TestE2E_QueueBackpressureImmediate(t *testing.T) {
 
 	proxyURL := "http://" + tp.listener.Addr().String()
 
-	var firstReqDone atomic.Bool
+	// Occupy the single upstream slot so the burst below overflows the queue.
 	go func() {
-		http.Get(proxyURL + "/")
-		firstReqDone.Store(true)
+		resp, err := http.Get(proxyURL + "/")
+		if err != nil {
+			return
+		}
+		_ = resp.Body.Close()
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -521,8 +542,8 @@ func TestE2E_QueueBackpressureImmediate(t *testing.T) {
 			if err != nil {
 				return
 			}
-			defer resp.Body.Close()
-			io.Copy(io.Discard, resp.Body)
+			defer func() { _ = resp.Body.Close() }()
+			_, _ = io.Copy(io.Discard, resp.Body)
 			mu.Lock()
 			results = append(results, resp.StatusCode)
 			mu.Unlock()
