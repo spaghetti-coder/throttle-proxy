@@ -30,7 +30,6 @@ The throttle-proxy project employs multiple test layers to ensure correctness, r
 | **Integration Tests** | Verify component interactions | `integration/integration_test.go` |
 | **Property-Based Tests** | Verify mathematical invariants | `internal/upstream/upstream_properties_test.go` |
 | **E2E Tests** | End-to-end scenarios with HTTP | `internal/proxy/proxy_e2e_test.go` |
-| **Benchmark Tests** | Performance regression detection | `*_test.go` (Benchmark functions) |
 
 ### Coverage Targets
 
@@ -63,9 +62,12 @@ go test -race -count 1 ./...
 
 ### Run with Coverage
 
+Coverage is counted across packages: a proxy or integration test that exercises the
+dispatcher counts toward dispatcher coverage.
+
 ```bash
 # Generate coverage profile
-go test -coverprofile=coverage.out ./...
+go test -count 1 -coverpkg=throttle-proxy/... -coverprofile=coverage.out ./...
 
 # View coverage in terminal
 go tool cover -func=coverage.out
@@ -166,12 +168,11 @@ go test -v ./internal/proxy/...
 
 **File:** `internal/upstream/upstream_test.go`
 
-Tests upstream management:
-- Health tracking
-- Failover logic
-- Exponential backoff
-- Delay escalation
-- State transitions
+Tests upstream state management:
+- State initialization, including the default escalation factors
+- Delay escalation trigger, cap and reset
+- Delay randomization bounds
+- Concurrency safety
 
 ```bash
 go test -v ./internal/upstream/...
@@ -265,16 +266,15 @@ Property-based tests verify mathematical invariants and properties using randomi
 ### What They Verify
 
 Using Go's `testing/quick` package, these tests verify:
-- **Escalation bounds:** Delay never exceeds configured maximum
-- **Backoff calculation:** Exponential backoff follows expected curve
-- **State consistency:** Health transitions are valid
-- **Deadline ordering:** EDF scheduling maintains priority invariants
+- **Escalation cap:** `escalationCount` never exceeds `ESCALATE_MAX_COUNT`
+- **Scheduling monotonicity:** `NextMinTs` never moves into the past
+- **Delay randomization:** `randDuration` stays inside `[min, max]`
 
 ### Running Property-Based Tests
 
 ```bash
 # Run property tests explicitly
-go test -v ./internal/upstream/... -run Properties
+go test -v ./internal/upstream/... -run Property
 
 # Run all tests including properties
 go test -v ./internal/upstream/...
@@ -298,12 +298,13 @@ End-to-end tests verify complete scenarios using real HTTP requests.
 
 **File:** `internal/proxy/proxy_e2e_test.go`
 
-### What They Verify
-
-1. **Graceful Shutdown:** Server completes in-flight requests before exiting
-2. **Failover Chains:** Multiple upstream failures cascade correctly
+1. **Failover Chains:** Multiple upstream failures cascade correctly
+2. **Rate Limits:** 429/403 reach the client without failing over
 3. **Streaming:** Large response bodies stream correctly
 4. **Backpressure:** Slow upstreams don't overwhelm the proxy
+
+Shutdown of queued requests is covered by `TestRun_ResolvesQueuedRequestsOnShutdown`
+(dispatcher) and the `run()` tests in `cmd/throttle-proxy`.
 
 ### Running E2E Tests
 
@@ -451,37 +452,23 @@ go test -v -count 1 ./internal/config/... -run TestParseConfig
 
 ### Current Coverage by Package
 
-| Package | Coverage | Status |
-|---------|----------|--------|
-| `cmd/throttle-proxy` | 80.9% | ✓ Good |
-| `internal/config` | 95.9% | ✓ Good |
-| `internal/dispatcher` | 89.6% | ✓ Good |
-| `internal/proxy` | 95.8% | ✓ Good |
-| `internal/upstream` | 100.0% | ✓ Good |
-| `internal/xforwarded` | 100.0% | ✓ Good |
-| **Overall** | **92.5%** | ✓ Target met |
+Counted with `-coverpkg=throttle-proxy/...`, so every test layer counts toward every
+package it reaches.
 
-*Generated: 2026-05-02*
+| Source package | Coverage |
+|----------------|----------|
+| `cmd/throttle-proxy` | 80.9% |
+| `internal/config` | 95.1% |
+| `internal/dispatcher` | 86.5% |
+| `internal/proxy` | 95.8% |
+| `internal/upstream` | 100.0% |
+| `internal/xforwarded` | 100.0% |
+| **Overall** | **91.0%** |
 
-### Coverage Breakdown
+*Generated: 2026-05-08*
 
-| Test Type | Coverage | Notes |
-|-----------|----------|-------|
-| Unit Tests | ~25% | Isolated function testing |
-| E2E Tests | 70.8% | Integration scenarios with httptest servers |
-| **Combined** | **95.8%** | Full proxy package coverage |
-
-**Note:** E2E tests achieve 70.8% coverage because they test complete
-integration scenarios (graceful shutdown, failover chains, body streaming,
-queue backpressure) that require the full system. Unit tests cover the
-remaining functions in isolation.
-
-### Coverage History
-
-| Date | Overall | Notes |
-|------|---------|-------|
-| 2026-05-02 | 80.0% | Phase 4 complete, all targets met |
-| 2026-05-02 | 75.8% | After Phase 3 refactoring |
+`main()` itself is untested (0%): it only wires signals and calls `run()`, which is tested
+directly in `cmd/throttle-proxy`.
 
 ### How to Improve Coverage
 

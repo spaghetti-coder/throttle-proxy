@@ -60,26 +60,6 @@ func TestNewState_Initialization(t *testing.T) {
 	}
 }
 
-// TestNextMinTs_ThreadSafe tests thread safety of NextMinTs
-func TestNextMinTs_ThreadSafe(t *testing.T) {
-	u, _ := url.Parse("http://localhost:8080")
-	cfg := &config.Config{DelayMin: 1 * time.Second, DelayMax: 2 * time.Second}
-	state := NewState(u, cfg)
-
-	const goroutines = 100
-	var wg sync.WaitGroup
-	wg.Add(goroutines)
-
-	for i := 0; i < goroutines; i++ {
-		go func() {
-			defer wg.Done()
-			_ = state.NextMinTs()
-		}()
-	}
-
-	wg.Wait()
-}
-
 // TestUpdateAfterRequest_FirstRequest tests first request handling
 func TestUpdateAfterRequest_FirstRequest(t *testing.T) {
 	u, _ := url.Parse("http://localhost:8080")
@@ -123,8 +103,13 @@ func TestUpdateAfterRequest_EscalationTrigger(t *testing.T) {
 	if state.escalationCount != 1 {
 		t.Errorf("expected escalationCount 1 after trigger, got %d", state.escalationCount)
 	}
-	if state.delayMin <= cfg.DelayMin {
-		t.Errorf("expected delayMin to increase, got %v", state.delayMin)
+
+	// No factors in cfg: escalation must scale each delay by the default 1.5x-2.0x.
+	if low, high := time.Duration(float64(cfg.DelayMin)*1.5), time.Duration(float64(cfg.DelayMin)*2.0); state.delayMin < low || state.delayMin > high {
+		t.Errorf("expected delayMin in [%v, %v] after escalation, got %v", low, high, state.delayMin)
+	}
+	if low, high := time.Duration(float64(cfg.DelayMax)*1.5), time.Duration(float64(cfg.DelayMax)*2.0); state.delayMax < low || state.delayMax > high {
+		t.Errorf("expected delayMax in [%v, %v] after escalation, got %v", low, high, state.delayMax)
 	}
 }
 
@@ -150,28 +135,6 @@ func TestUpdateAfterRequest_EscalationDisabled(t *testing.T) {
 	}
 	if state.delayMin != cfg.DelayMin {
 		t.Errorf("expected delayMin unchanged, got %v", state.delayMin)
-	}
-}
-
-// TestUpdateAfterRequest_MaxCount tests escalation stops at max count
-func TestUpdateAfterRequest_MaxCount(t *testing.T) {
-	u, _ := url.Parse("http://localhost:8080")
-	cfg := &config.Config{
-		DelayMin:         10 * time.Millisecond,
-		DelayMax:         20 * time.Millisecond,
-		EscalateAfter:    2,
-		EscalateMaxCount: 2, // Stop after 2 escalations
-	}
-	state := NewState(u, cfg)
-	rng := rand.New(rand.NewSource(42))
-
-	now := time.Now()
-	for i := 0; i < 20; i++ {
-		state.UpdateAfterRequest(now.Add(time.Duration(i*15)*time.Millisecond), rng)
-	}
-
-	if state.escalationCount > cfg.EscalateMaxCount {
-		t.Errorf("expected escalationCount <= %d, got %d", cfg.EscalateMaxCount, state.escalationCount)
 	}
 }
 

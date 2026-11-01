@@ -25,7 +25,7 @@ type Handler struct {
 }
 
 // NewHandler returns a Handler for cfg. Throttled endpoints require disp.Run to be
-// running; without it they get 503.
+// running to be served.
 func NewHandler(cfg *config.Config, disp *dispatcher.Dispatcher) *Handler {
 	passthroughs := make([]*httputil.ReverseProxy, len(cfg.Upstreams))
 	for i, u := range cfg.Upstreams {

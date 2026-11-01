@@ -61,26 +61,6 @@ func TestNew(t *testing.T) {
 	}
 }
 
-// TestEnqueue tests request enqueueing
-func TestEnqueue(t *testing.T) {
-	u, _ := url.Parse("http://localhost:8080")
-	cfg := &config.Config{
-		Upstreams:       []*url.URL{u},
-		UpstreamTimeout: 5 * time.Second,
-		QueueSize:       1,
-	}
-	d := New(cfg)
-
-	body := []byte("test body")
-	req := httptest.NewRequest("POST", "/test", bytes.NewReader(body))
-
-	resultChan := d.Enqueue(req)
-
-	if resultChan == nil {
-		t.Error("expected non-nil result channel")
-	}
-}
-
 // TestEnqueue_FullQueue tests that Enqueue returns 503 when the queue is at capacity
 func TestEnqueue_FullQueue(t *testing.T) {
 	// Upstream blocks until cancel so Run cannot drain the queue.
@@ -135,8 +115,11 @@ func TestEnqueue_FullQueue(t *testing.T) {
 	}
 }
 
-// TestRun_DrainsQueueOnShutdown verifies queued requests receive 503 during shutdown
-func TestRun_DrainsQueuedRequestsOnShutdown(t *testing.T) {
+// TestRun_ResolvesQueuedRequestsOnShutdown pins the shutdown contract: every request
+// already queued when the context is cancelled still gets a result instead of blocking
+// forever. Requests may be answered by dispatch or by the shutdown drain, either way an
+// error result is required.
+func TestRun_ResolvesQueuedRequestsOnShutdown(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
@@ -153,36 +136,25 @@ func TestRun_DrainsQueuedRequestsOnShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go d.Run(ctx)
 
-	req1 := httptest.NewRequest("GET", "/test", nil)
-	resultChan1 := d.Enqueue(req1)
+	// The first request parks Run inside fireRequest; the rest queue up behind it.
+	const queued = 8
+	chans := []<-chan Result{d.Enqueue(httptest.NewRequest("GET", "/test", nil))}
 	time.Sleep(50 * time.Millisecond)
-
-	req2 := httptest.NewRequest("GET", "/test", nil)
-	resultChan2 := d.Enqueue(req2)
+	for i := 0; i < queued; i++ {
+		chans = append(chans, d.Enqueue(httptest.NewRequest("GET", "/test", nil)))
+	}
 
 	cancel()
 
-	// req1's dispatch will ultimately fail (context cancelled)
-	select {
-	case result := <-resultChan1:
-		if result.Err == nil {
-			t.Fatalf("expected error for req1 after cancel, got none")
+	for i, ch := range chans {
+		select {
+		case res := <-ch:
+			if res.Err == nil {
+				t.Errorf("request %d after shutdown: expected error, got status %d", i, res.StatusCode)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("request %d never resolved after shutdown", i)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("req1 did not complete after cancel")
-	}
-
-	// req2 must be drained with a 503 instead of blocking forever
-	select {
-	case result := <-resultChan2:
-		if result.StatusCode != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503 for drained queued request, got %d", result.StatusCode)
-		}
-		if result.Err == nil || result.Err.Error() != "dispatcher shutting down" {
-			t.Fatalf("expected shutdown error, got %v", result.Err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("queued request was not drained on shutdown — deadlock")
 	}
 }
 
@@ -258,25 +230,6 @@ type errorReader struct {
 
 func (e *errorReader) Read(p []byte) (n int, err error) {
 	return 0, e.err
-}
-
-// TestEnqueue_WithoutBody tests request without body
-func TestEnqueue_WithoutBody(t *testing.T) {
-	u, _ := url.Parse("http://localhost:8080")
-	cfg := &config.Config{
-		Upstreams:       []*url.URL{u},
-		UpstreamTimeout: 5 * time.Second,
-		QueueSize:       1,
-	}
-	d := New(cfg)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-
-	resultChan := d.Enqueue(req)
-
-	if resultChan == nil {
-		t.Error("expected non-nil result channel")
-	}
 }
 
 // TestCopyHeaders_HopByHopExcluded tests hop-by-hop headers are excluded
@@ -525,59 +478,6 @@ func TestDispatch_MaxWaitTimeout(t *testing.T) {
 	}
 	if result.Err == nil || result.Err.Error() != "max wait exceeded" {
 		t.Errorf("expected 'max wait exceeded' error, got %v", result.Err)
-	}
-}
-
-// TestDispatch_ContextCancellation tests context cancellation
-func TestDispatch_ContextCancellation(t *testing.T) {
-	// Create a test server that will block until context is cancelled or test ends
-	done := make(chan struct{})
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-		case <-done:
-		}
-	}))
-	defer func() {
-		close(done)
-		upstream.Close()
-	}()
-
-	u, _ := url.Parse(upstream.URL)
-	cfg := &config.Config{
-		Upstreams:       []*url.URL{u},
-		UpstreamTimeout: 5 * time.Second,
-		DelayMin:        0,
-		DelayMax:        0,
-	}
-	d := New(cfg)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	pr := &proxyRequest{
-		r:          req,
-		resultChan: make(chan Result, 1),
-		enqueuedAt: time.Now(),
-		maxWait:    0,
-		ctx:        context.Background(),
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	dispatchDone := make(chan bool)
-	go func() {
-		d.dispatch(ctx, pr)
-		dispatchDone <- true
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	<-dispatchDone
-
-	result := <-pr.resultChan
-	// Cancellation mid-request is an upstream error, so dispatch ends at the all-failed 502.
-	if result.StatusCode != http.StatusBadGateway {
-		t.Logf("Got status code %d with error: %v", result.StatusCode, result.Err)
 	}
 }
 

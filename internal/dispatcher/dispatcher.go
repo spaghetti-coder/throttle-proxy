@@ -82,13 +82,15 @@ func New(cfg *config.Config) *Dispatcher {
 		},
 	}
 
-	return &Dispatcher{
+	d := &Dispatcher{
 		cfg:    cfg,
 		states: states,
 		queue:  make(chan *proxyRequest, cfg.QueueSize),
 		client: client,
 		rng:    rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+	d.running.Store(true)
+	return d
 }
 
 // Enqueue reads the request body and places the request into the dispatch queue.
@@ -135,7 +137,6 @@ func (d *Dispatcher) Enqueue(r *http.Request) <-chan Result {
 
 // Run is the single dispatcher goroutine. It must be started exactly once.
 func (d *Dispatcher) Run(ctx context.Context) {
-	d.running.Store(true)
 	defer func() {
 		d.running.Store(false)
 	}()

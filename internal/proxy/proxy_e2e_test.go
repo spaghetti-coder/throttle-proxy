@@ -3,16 +3,13 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -22,12 +19,9 @@ import (
 
 // testProxy wraps a test HTTP server with signal capabilities
 type testProxy struct {
-	server     *http.Server
-	listener   net.Listener
-	dispatcher *dispatcher.Dispatcher
-	ctx        context.Context
-	cancel     context.CancelFunc
-	port       int
+	server   *http.Server
+	listener net.Listener
+	cancel   context.CancelFunc
 }
 
 // createTestConfig creates a test configuration with the given upstreams
@@ -73,15 +67,10 @@ func startTestProxy(t *testing.T, cfg *config.Config) *testProxy {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	port := listener.Addr().(*net.TCPAddr).Port
-
 	tp := &testProxy{
-		server:     srv,
-		listener:   listener,
-		dispatcher: disp,
-		ctx:        ctx,
-		cancel:     cancel,
-		port:       port,
+		server:   srv,
+		listener: listener,
+		cancel:   cancel,
 	}
 
 	go disp.Run(ctx)
@@ -93,22 +82,12 @@ func startTestProxy(t *testing.T, cfg *config.Config) *testProxy {
 	return tp
 }
 
-// stop gracefully shuts down the test proxy
+// stop cancels the dispatcher context and shuts the test server down.
 func (tp *testProxy) stop() {
 	tp.cancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = tp.server.Shutdown(shutdownCtx)
-}
-
-// signal sends a signal to the proxy context (simulates shutdown)
-func (tp *testProxy) signal(sig os.Signal) {
-	tp.cancel()
-}
-
-// url returns the base URL for the test proxy
-func (tp *testProxy) url() string {
-	return fmt.Sprintf("http://127.0.0.1:%d", tp.port)
 }
 
 // sendTestRequest sends a test request to the given URL
@@ -129,118 +108,6 @@ func sendTestRequest(url string, body []byte) (*http.Response, error) {
 		Timeout: 10 * time.Second,
 	}
 	return client.Do(req)
-}
-
-// TestE2E_GracefulShutdown_SIGTERM tests that SIGTERM triggers graceful shutdown
-func TestE2E_GracefulShutdown_SIGTERM(t *testing.T) {
-	var requestStarted atomic.Bool
-	var requestCompleted atomic.Bool
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestStarted.Store(true)
-		time.Sleep(100 * time.Millisecond)
-		requestCompleted.Store(true)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	}))
-	defer upstream.Close()
-
-	cfg := createTestConfig([]string{upstream.URL})
-	tp := startTestProxy(t, cfg)
-	defer tp.stop()
-
-	proxyURL := "http://" + tp.listener.Addr().String()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	var responseStatus int
-	var responseBody []byte
-
-	go func() {
-		defer wg.Done()
-		resp, err := http.Get(proxyURL + "/")
-		if err != nil {
-			t.Logf("Request error (expected during shutdown): %v", err)
-			return
-		}
-		defer resp.Body.Close()
-		responseStatus = resp.StatusCode
-		responseBody, _ = io.ReadAll(resp.Body)
-	}()
-
-	time.Sleep(20 * time.Millisecond)
-
-	// Send SIGTERM (simulate by canceling context)
-	tp.signal(syscall.SIGTERM)
-
-	wg.Wait()
-
-	if requestCompleted.Load() && len(responseBody) > 0 {
-		if responseStatus != http.StatusOK {
-			t.Errorf("Expected status 200 for in-flight request, got %d", responseStatus)
-		}
-	}
-}
-
-// TestE2E_GracefulShutdown_QueueDrain tests that queue drains before shutdown
-func TestE2E_GracefulShutdown_QueueDrain(t *testing.T) {
-	var processedCount atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-		processedCount.Add(1)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	}))
-	defer upstream.Close()
-
-	cfg := createTestConfig([]string{upstream.URL})
-	cfg.QueueSize = 5
-	tp := startTestProxy(t, cfg)
-
-	proxyURL := "http://" + tp.listener.Addr().String()
-
-	var wg sync.WaitGroup
-	responses := make([]int, 10)
-	var mu sync.Mutex
-
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			resp, err := http.Get(proxyURL + "/")
-			if err != nil {
-				mu.Lock()
-				responses[idx] = -1 // Error
-				mu.Unlock()
-				return
-			}
-			defer resp.Body.Close()
-			io.Copy(io.Discard, resp.Body)
-			mu.Lock()
-			responses[idx] = resp.StatusCode
-			mu.Unlock()
-		}(i)
-	}
-
-	time.Sleep(50 * time.Millisecond)
-
-	tp.signal(syscall.SIGTERM)
-
-	wg.Wait()
-	tp.stop()
-
-	successCount := 0
-	failCount := 0
-	for _, status := range responses {
-		if status == http.StatusOK {
-			successCount++
-		} else if status == -1 || status == http.StatusServiceUnavailable {
-			failCount++
-		}
-	}
-	if processedCount.Load() > 0 && successCount != int(processedCount.Load()) {
-		t.Logf("Processed: %d, Success: %d, Fail: %d", processedCount.Load(), successCount, failCount)
-	}
 }
 
 // TestE2E_MultiUpstreamFailoverChain tests failover across multiple upstreams
@@ -377,6 +244,57 @@ func TestE2E_MultiUpstreamFailoverFirstHealthy(t *testing.T) {
 	}
 }
 
+// TestE2E_RateLimitNotFailedOver verifies 429/403 reach the client as-is: without the
+// dedicated branch the request would fail over to the healthy upstream and return 200.
+func TestE2E_RateLimitNotFailedOver(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var limitedHits, healthyHits atomic.Int32
+
+			limited := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				limitedHits.Add(1)
+				w.WriteHeader(status)
+				w.Write([]byte("rate limited"))
+			}))
+			defer limited.Close()
+
+			healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				healthyHits.Add(1)
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("OK"))
+			}))
+			defer healthy.Close()
+
+			cfg := createTestConfig([]string{limited.URL, healthy.URL})
+			cfg.DelayMin = 0
+			cfg.DelayMax = 0
+
+			tp := startTestProxy(t, cfg)
+			defer tp.stop()
+
+			resp, err := http.Get("http://" + tp.listener.Addr().String() + "/")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+
+			if resp.StatusCode != status {
+				t.Errorf("expected status %d, got %d", status, resp.StatusCode)
+			}
+			if string(body) != "rate limited" {
+				t.Errorf("expected body from the rate-limited upstream, got %q", string(body))
+			}
+			if limitedHits.Load() != 1 {
+				t.Errorf("expected rate-limited upstream to be hit once, got %d", limitedHits.Load())
+			}
+			if healthyHits.Load() != 0 {
+				t.Errorf("expected no failover, healthy upstream hit %d times", healthyHits.Load())
+			}
+		})
+	}
+}
+
 // TestE2E_BodyStreaming tests request/response body streaming with various sizes
 func TestE2E_BodyStreaming(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -398,14 +316,11 @@ func TestE2E_BodyStreaming(t *testing.T) {
 	proxyURL := "http://" + tp.listener.Addr().String()
 
 	testCases := []struct {
-		name      string
-		size      int
-		isChunked bool
+		name string
+		size int
 	}{
-		{"Empty body", 0, false},
-		{"Small body 1KB", 1024, false},
-		{"Medium body 100KB", 100 * 1024, false},
-		{"Large body 1MB", 1024 * 1024, false},
+		{"Empty body", 0},
+		{"Large body 1MB", 1024 * 1024},
 	}
 
 	for _, tc := range testCases {

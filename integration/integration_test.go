@@ -56,9 +56,6 @@ func TestSequentialProcessing(t *testing.T) {
 	defer cancel()
 	go disp.Run(ctx)
 
-	// Wait for dispatcher to start accepting requests
-	time.Sleep(10 * time.Millisecond)
-
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -101,6 +98,7 @@ func TestFailoverBehavior(t *testing.T) {
 		DelayMin:        0,
 		DelayMax:        0,
 		Endpoints:       []string{"/"},
+		QueueSize:       100,
 	}
 
 	disp := dispatcher.New(cfg)
@@ -109,9 +107,6 @@ func TestFailoverBehavior(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
-
-	// Wait for dispatcher to start accepting requests
-	time.Sleep(10 * time.Millisecond)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	rr := httptest.NewRecorder()
@@ -144,6 +139,7 @@ func TestEndpointMatching(t *testing.T) {
 		DelayMin:        0,
 		DelayMax:        0,
 		Endpoints:       []string{"/search"},
+		QueueSize:       100,
 	}
 
 	disp := dispatcher.New(cfg)
@@ -152,9 +148,6 @@ func TestEndpointMatching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
-
-	// Wait for dispatcher to start accepting requests
-	time.Sleep(10 * time.Millisecond)
 
 	tests := []struct {
 		path           string
@@ -173,25 +166,28 @@ func TestEndpointMatching(t *testing.T) {
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, req)
 
-			if rr.Code != http.StatusOK && rr.Code != http.StatusServiceUnavailable {
+			if rr.Code != http.StatusOK {
 				t.Errorf("unexpected status code for %s: %d", tt.path, rr.Code)
 			}
 		})
 	}
 }
 
-// TestRoundRobinPassthrough tests round-robin for passthrough endpoints
+// TestRoundRobinPassthrough checks passthrough requests walk the upstreams in order,
+// starting at the first one.
 func TestRoundRobinPassthrough(t *testing.T) {
-	var counts []atomic.Int64
-
 	upstreams := make([]*httptest.Server, 3)
 	upstreamURLs := make([]*url.URL, 3)
 
+	var mu sync.Mutex
+	var order []int
+
 	for i := range upstreams {
-		counts = append(counts, atomic.Int64{})
 		idx := i
 		upstreams[i] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			counts[idx].Add(1)
+			mu.Lock()
+			order = append(order, idx)
+			mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer upstreams[i].Close()
@@ -213,9 +209,15 @@ func TestRoundRobinPassthrough(t *testing.T) {
 		handler.ServeHTTP(rr, req)
 	}
 
-	for i := range counts {
-		if c := counts[i].Load(); c != 3 {
-			t.Errorf("expected upstream %d to receive 3 requests, got %d", i, c)
+	want := []int{0, 1, 2, 0, 1, 2, 0, 1, 2}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) != len(want) {
+		t.Fatalf("expected %d requests, got %v", len(want), order)
+	}
+	for i, w := range want {
+		if order[i] != w {
+			t.Fatalf("expected upstream order %v, got %v", want, order)
 		}
 	}
 }
@@ -251,9 +253,6 @@ func TestConcurrentSafe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go disp.Run(ctx)
-
-	// Wait for dispatcher to start accepting requests
-	time.Sleep(10 * time.Millisecond)
 
 	var wg sync.WaitGroup
 
