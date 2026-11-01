@@ -2,12 +2,11 @@
 
 A lightweight Go reverse proxy that protects upstream services from request floods by serializing and throttling requests.
 
-It sits between clients and upstream servers, ensuring that at most one request is in-flight at any given time per upstream. Requests are queued and dispatched using Earliest Deadline First (EDF) scheduling with configurable, randomized delays. Under sustained high-frequency load, delays automatically escalate to avoid triggering upstream rate limits.
+It sits between clients and upstream servers: at most one request is in-flight per upstream. Requests are queued and dispatched by earliest availability with randomized delays, which escalate under sustained load to stay clear of upstream rate limits.
 
 ## Table of Contents
 
 - [When to use](#when-to-use)
-- [Features](#features)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
   - [Environment variables](#environment-variables)
@@ -17,32 +16,22 @@ It sits between clients and upstream servers, ensuring that at most one request 
 - [Installation](#installation)
   - [Docker](#docker)
   - [Go](#go)
-- [Testing](#testing)
 
 ## When to use
 
-- **AI agent integrations**: Your agent can issue dozens parallel `curl` requests to a meta-search engine (e.g., [SearxNG](https://docs.searxng.org/)). The backend proxies them to Google, Bing, DuckDuckGo, which detect simultaneous requests and ban your IP. `throttle-proxy` serializes these requests, adds human-like jitter between them, and gradually backs off if the load pattern persists.
-- **Scraping protection**: You need to enforce a strict "one request at a time" policy to a fragile or rate-limited API, with automatic delay escalation when the upstream signals it is unhappy.
-- **General rate-limiting**: Any scenario where you want to queue and throttle requests to specific endpoints while letting others pass through unaffected.
-
-## Features
-
-- **Request serialization**: At most one in-flight request per upstream at any time
-- **EDF scheduling**: Earliest Deadline First dispatch across multiple upstreams
-- **Automatic delay escalation**: Gradually increases delays under sustained high-frequency load
-- **Round-robin passthrough**: Non-throttled endpoints bypass the queue entirely
-- **Upstream health tracking**: Automatic failover and exponential backoff on 5xx/timeout
-- **Thread-safe queue**: Configurable max size with wait-time limits
-- **Zero dependencies**: Pure Go 1.24, ~single binary
-- **Docker-ready**: Multi-stage build, multi-platform (`linux/amd64`, `linux/arm64`)
+- **AI agents**: an agent firing dozens of parallel `curl` calls at a meta-search engine (e.g. [SearxNG](https://docs.searxng.org/)) gets its IP banned, because the engine sees simultaneous requests. Serialization plus randomized delays fix that.
+- **Scraping**: enforce "one request at a time" against a fragile or rate-limited API.
+- **Selective throttling**: throttle the endpoints you choose, pass everything else straight through.
 
 ## Quick Start
 
 ```bash
 docker run -p 8080:8080 \
-  -e UPSTREAM=http://localhost:9000 \
+  -e UPSTREAM=http://host.docker.internal:9000 \
   ghcr.io/spaghetti-coder/throttle-proxy:latest
 ```
+
+`localhost` inside the container is the container itself; use `host.docker.internal` (or `--network host` on Linux) to reach an upstream running on the host.
 
 For persistent configuration, copy [`compose.yaml`](compose.yaml) to your project, edit the environment variables, and run:
 
@@ -69,15 +58,15 @@ docker compose up -d
 
 ### MCP tool timeouts for AI agents
 
-Default MCP tool call timeouts in AI agents (typically 30–120 s) may be too short when the proxy queue backs up. Depending on `QUEUE_SIZE`, `DELAY`, and escalation settings, requests can wait well beyond the agent's default. Increase the timeout in your agent's configuration file to prevent disconnects:
+When the queue backs up, a throttled call can outlive the agent's default MCP tool timeout. Raise it in the agent config:
 
-| Agent           | Config key                 | Suggested  | File            |
-|-----------------|----------------------------|------------|-----------------|
-| **OpenCode**    | `experimental.mcp_timeout` | 310000     |`opencode.jsonc` |
-| **Hermes**      | `mcp_servers.timeout`      | 310000     | `config.yaml`   |
-| **Claude Code** | `env.MCP_TOOL_TIMEOUT`     | 310000     |`.claude.json`   |
+| Agent           | Config key                 | Suggested | File              |
+|-----------------|----------------------------|-----------|-------------------|
+| **OpenCode**    | `experimental.mcp_timeout` | `310000`  | `opencode.jsonc`  |
+| **Hermes**      | `mcp_servers.timeout`      | `310000`  | `config.yaml`     |
+| **Claude Code** | `env.MCP_TOOL_TIMEOUT`     | `310000`  | `.claude.json`    |
 
-`310000` is not a magic number. Most MCP servers drop connections after 5 minutes (at least mu current in use).
+`310000` ms = 5 min plus margin: that is when most MCP servers give up on a tool call.
 
 ### Example: SearxNG with conservative delays
 
@@ -92,21 +81,20 @@ docker run -p 8080:8080 \
 ```
 
 In this setup:
-- Each upstream waits 5–9 seconds between requests.
-- If 3 requests arrive within a tight window, delays escalate by `ESCALATE_FACTOR`.
-- The escalation can repeat up to 6 times before capping.
-- Only `/search` and `/images` are throttled; everything else passes straight through.
+- Each upstream gets a 5–9 second gap between requests.
+- 3 requests in a short window multiply the delays by `ESCALATE_FACTOR`, up to 6 times.
+- Only `/search` and `/images` are throttled; everything else bypasses the queue.
 
 ## How it works
 
 1. **Queue**: Incoming requests matching `ENDPOINTS` are placed in a thread-safe queue.
-2. **EDF dispatch**: For multiple upstreams, the proxy picks the one with the earliest available deadline, waits if necessary, then forwards the request.
-3. **Per-upstream state**: Each upstream tracks its own `next_min_ts` and escalation window independently.
+2. **EDF dispatch**: Earliest Deadline First — with several upstreams the proxy picks the one that becomes available soonest, waits if necessary, then forwards.
+3. **Per-upstream state**: each upstream keeps its own schedule and escalation state, so one banned engine does not slow the others.
 4. **Failover**: If an upstream times out or returns 5xx, the request is retried on the next available upstream.
-5. **Escalation**: When sustained load is detected (configured via `ESCALATE_AFTER`), delays increase multiplicatively (by `ESCALATE_FACTOR`) to stay under upstream radar.
+5. **Escalation**: When sustained load is detected (configured via `ESCALATE_AFTER`), delays increase multiplicatively (by `ESCALATE_FACTOR`).
 6. **Passthrough**: Requests that do not match any `ENDPOINTS` prefix skip the queue and are forwarded immediately via round-robin.
 
-For the full algorithmic specification — including exact escalation formulas, sliding window semantics, and multi-upstream retry logic — see [`spec.md`](spec.md).
+Full algorithm details: [`spec.md`](spec.md).
 
 ## Installation
 
@@ -132,23 +120,11 @@ docker buildx build --platform linux/amd64,linux/arm64 -t throttle-proxy:latest 
 
 ### Go
 
-Requires Go 1.24+.
+Requires Go 1.24+. No external dependencies.
 
 ```bash
 git clone https://github.com/spaghetti-coder/throttle-proxy.git
 cd throttle-proxy
 go build -o throttle-proxy ./cmd/throttle-proxy
 ./throttle-proxy
-```
-
-## Testing
-
-```bash
-go test -count 1 ./...
-```
-
-Integration tests cover sequential processing, upstream failover, endpoint matching, and round-robin passthrough:
-
-```bash
-go test -count 1 ./integration/...
 ```
